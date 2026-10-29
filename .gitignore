@@ -1,0 +1,30 @@
+# secrets
+.env*
+!.env.example
+!.env.*.example
+
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# tooling output
+.playwright/
+/scripts/.shots/
+/scripts/.work/
+.lighthouseci/
+coverage/
+
+# laravel (later)
+/backend/vendor/
+/backend/storage/*.key
+
+# misc
+.DS_Store
+Thumbs.db
+npm-debug.log*
+.vercel

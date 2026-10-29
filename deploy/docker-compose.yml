@@ -1,0 +1,162 @@
+# Production: the website, the API with its admin panel, the nightly-jobs runner, the queue
+# worker and MariaDB,
+# behind Caddy (HTTPS). Only Caddy is reachable from outside (ports 80 and 443).
+#
+#   cd deploy
+#   cp .env.example .env    # then fill it in
+#   docker compose up -d --build
+#
+# The root docker-compose.yml is the developer setup (with a mail catcher); this file is
+# the one for the server.
+
+name: bueno
+
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates: keep them, or Let's Encrypt rate limits bite after a few rebuilds.
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # MariaDB, not MySQL: the server's virtual CPU lacks the x86-64-v2 instructions that the
+  # mysql:8.4 image needs ("Fatal glibc error: CPU does not support x86-64-v2").
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: rental
+      MARIADB_USER: rental
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in deploy/.env}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  backend:
+    build: ../backend
+    image: bueno-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: &backend-env
+      APP_NAME: ${APP_NAME:-Bueno Exotics}
+      APP_ENV: production
+      APP_DEBUG: "false"
+      # The address in links the API writes (document links, admin links in emails).
+      APP_URL: https://${DOMAIN}
+      # Empty: the container creates a key once and keeps it in the storage volume.
+      APP_KEY: ${APP_KEY:-}
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: warning
+      DB_CONNECTION: mariadb
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: rental
+      DB_USERNAME: rental
+      DB_PASSWORD: ${DB_PASSWORD}
+      CACHE_STORE: database
+      # Queued jobs wait in the database for the `queue` container (the review request goes
+      # out hours after the return; "sync" would send it at once).
+      QUEUE_CONNECTION: database
+      SESSION_SECURE_COOKIE: "true"
+      # Caddy is the only way in, so its forwarded headers are trusted.
+      TRUSTED_PROXIES: "*"
+      FRONTEND_URL: https://${DOMAIN}
+      MAIL_MAILER: ${MAIL_MAILER:-log}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SCHEME: ${MAIL_SCHEME:-}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-bookings@example.com}
+      MAIL_FROM_NAME: ${APP_NAME:-Bueno Exotics}
+      RENTAL_OWNER_EMAIL: ${RENTAL_OWNER_EMAIL:-}
+      RENTAL_CONTACT_EMAIL: ${RENTAL_CONTACT_EMAIL:-info@buenoexoticsny.com}
+      RENTAL_DEPOSIT_USD: ${RENTAL_DEPOSIT_USD:-1000}
+      RENTAL_DOCUMENT_RETENTION_DAYS: ${RENTAL_DOCUMENT_RETENTION_DAYS:-180}
+      # Google's "Ask for reviews" link for the thank-you email. Empty: no review requests.
+      GOOGLE_REVIEW_URL: ${GOOGLE_REVIEW_URL:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      STRIPE_SECRET: ${STRIPE_SECRET:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # The blog: after a post changes, the API asks the website to refresh its blog pages,
+      # straight over the internal network (Caddy does not let this path in from outside).
+      BLOG_REVALIDATE_URL: http://frontend:3000/internal/revalidate
+      BLOG_REVALIDATE_SECRET: ${BLOG_REVALIDATE_SECRET:-}
+    volumes:
+      # Customer documents, the blog's pictures and the generated app key: back this up.
+      - backend-storage:/var/www/html/storage
+
+  scheduler:
+    image: bueno-backend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      <<: *backend-env
+      APP_ROLE: scheduler
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - backend-storage:/var/www/html/storage
+
+  # Runs queued jobs (the review request after a return). Restarts itself hourly and past
+  # 128 MB, so a leak cannot build up on the small server.
+  queue:
+    image: bueno-backend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      <<: *backend-env
+      APP_ROLE: queue
+    command: ["php", "artisan", "queue:work", "--sleep=5", "--tries=3", "--max-time=3600", "--memory=128"]
+    volumes:
+      - backend-storage:/var/www/html/storage
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        # Compiled into the browser code: the API on the same address.
+        NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
+        # Stripe's publishable key, also compiled in. It must come from the same Stripe
+        # account and mode (test or live) as STRIPE_SECRET.
+        NEXT_PUBLIC_STRIPE_KEY: ${STRIPE_KEY:-}
+        # The Search Console ownership code and the GA4 measurement ID.
+        GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
+        NEXT_PUBLIC_GA_ID: ${GA_MEASUREMENT_ID:-}
+        # The Microsoft Clarity project ID (session recordings, lib/clarity.ts).
+        NEXT_PUBLIC_CLARITY_ID: ${CLARITY_PROJECT_ID:-}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # The site's server reads the daily price and the blog over the internal network.
+      API_INTERNAL_URL: http://backend/api
+      # Checked on the API's "refresh the blog pages" call (app/internal/revalidate).
+      BLOG_REVALIDATE_SECRET: ${BLOG_REVALIDATE_SECRET:-}
+
+volumes:
+  caddy-data:
+  caddy-config:
+  db-data:
+  backend-storage:

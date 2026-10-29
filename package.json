@@ -1,0 +1,21 @@
+{
+  "name": "car-rental",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo tooling for the car rental site (image pipeline, screenshots). The app lives in /frontend.",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend run start",
+    "lint": "npm --prefix frontend run lint",
+    "shoot": "node scripts/shoot.mjs",
+    "check": "node scripts/check-interactions.mjs",
+    "check:analytics": "node scripts/check-analytics.mjs",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "devDependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
+    "playwright": "^1.64.0",
+    "sharp": "^0.35.5"
+  }
+}

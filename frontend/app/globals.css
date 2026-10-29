@@ -1,0 +1,369 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens, sampled from /design/desktop.png and /design/mobile.png.
+ * Mockup scale: desktop 1024px -> 1440px (x1.406), mobile frame 342px -> 390px (x1.14).
+ * Change values here, not in components.
+ */
+@theme {
+  /* Brand */
+  --color-brand: #0a7aff; /* price, icons, map pin, accents on large type */
+  --color-brand-deep: #0566fb; /* button fills, links, accent lines, step numbers */
+  --color-brand-press: #0450d4; /* hover / active on fills */
+
+  /* Ink */
+  --color-ink: #0a1730; /* headings, logo */
+  --color-ink-soft: #1f2e4e; /* nav, spec values, FAQ questions */
+  --color-muted: #5a6d8d; /* descriptions, labels (AA on page + surface) */
+
+  /* Surfaces */
+  --color-page: #fcfdfe;
+  --color-card: #ffffff;
+  --color-surface: #f1f5f9; /* "coming soon" card, map land */
+  --color-tint: #e6f1fd; /* step number circles */
+  --color-line: #e9f1fa; /* hairlines, card borders */
+  --color-line-strong: #d7e4f3; /* input + FAQ borders */
+
+  /* Hero sky (also the stand-in backdrop until the hero photo exists) */
+  --color-sky: #a9cbea;
+  --color-sky-pale: #dcebf8;
+
+  /* Map */
+  --color-water: #bfdcf6;
+  --color-water-ink: #6f93bf;
+
+  /* Dark */
+  --color-navy: #0f2035; /* CTA banner, mobile footer */
+  --color-navy-soft: #18385c;
+
+  /* Feedback (booking form) */
+  --color-danger: #c8102e;
+  --color-success: #0b7a4b;
+  --color-warning: #a35200; /* "waiting for you" statuses on the booking page (AA on white) */
+
+  /* Type scale: mobile 390 -> desktop 1440, fluid in between */
+  --text-display: clamp(2.5rem, 1.989rem + 2.095vw, 3.875rem); /* 40 -> 62 */
+  --text-display--line-height: 1.07;
+  --text-display--letter-spacing: -0.005em;
+  --text-title: clamp(1.625rem, 1.439rem + 0.762vw, 2.125rem); /* 26 -> 34 */
+  --text-title--line-height: 1.15;
+  --text-title--letter-spacing: -0.02em;
+  --text-lead: clamp(1.0625rem, 0.993rem + 0.286vw, 1.25rem); /* 17 -> 20 */
+  --text-lead--line-height: 1.4;
+  --text-eyebrow: 0.6875rem; /* 11 */
+  --text-eyebrow--line-height: 1;
+  --text-eyebrow--letter-spacing: 0.12em;
+
+  /* Radii */
+  --radius-btn: 0.5rem; /* 8: desktop buttons */
+  --radius-btn-lg: 0.75rem; /* 12: mobile full-width buttons, FAQ rows */
+  --radius-card: 1rem; /* 16 */
+  --radius-panel: 1.25rem; /* 20: hero card on mobile, CTA banner */
+
+  /* Elevation */
+  --shadow-bar: 0 10px 30px -12px rgb(10 23 48 / 0.18), 0 2px 6px -2px rgb(10 23 48 / 0.06);
+  --shadow-card: 0 1px 2px rgb(10 23 48 / 0.04), 0 12px 32px -20px rgb(10 23 48 / 0.16);
+  --shadow-btn: 0 6px 16px -6px rgb(5 102 251 / 0.55);
+
+  /* Motion */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-fade-in: fade-in 0.3s var(--ease-out-soft);
+  --animate-rise: rise 0.4s var(--ease-out-soft) 0.6s both; /* cookie notice */
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 1rem;
+    }
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  /* Page gutters: 20 mobile, 40 tablet, 75 desktop. The content column tops out at 1290px. */
+  --gutter: 1.25rem;
+  --content-max: 80.625rem;
+  --header-h: 4rem;
+  --logo-size: 1.0625rem;
+  /* The Call / Text / Book Now bar fixed to the bottom on phones (MobileActionBar). */
+  --mobile-bar-h: 4.25rem;
+}
+
+/* Phones: room under the page for the fixed bar, so it never covers the footer; the bar
+   hides while the mobile menu is open (the menu has its own Book Now and phone). */
+@media (width < 48rem) {
+  body:has([data-mobile-bar]) {
+    padding-bottom: calc(var(--mobile-bar-h) + env(safe-area-inset-bottom));
+  }
+  html[data-menu-open] [data-mobile-bar],
+  html[data-menu-open] [data-cookie-notice] {
+    display: none;
+  }
+  body:has([data-mobile-bar]) [data-cookie-notice] {
+    bottom: calc(var(--mobile-bar-h) + env(safe-area-inset-bottom) + 0.5rem);
+  }
+}
+
+/* The cookie notice (CookieNotice), wherever the phone bar does not lift it. */
+[data-cookie-notice] {
+  bottom: calc(0.75rem + env(safe-area-inset-bottom));
+}
+@media (width >= 48rem) {
+  [data-cookie-notice] {
+    bottom: 1.5rem;
+  }
+}
+
+@media (width >= 48rem) {
+  :root {
+    --gutter: 2.5rem;
+  }
+}
+
+@media (width >= 80rem) {
+  :root {
+    --gutter: 4.6875rem;
+    --header-h: 5.75rem;
+    --logo-size: 1.75rem;
+  }
+}
+
+@utility container-site {
+  width: 100%;
+  max-width: calc(var(--content-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: var(--header-h);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-page);
+    color: var(--color-ink-soft);
+    font-family: var(--font-sans);
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    color: var(--color-ink);
+  }
+
+  /* Tailwind resets buttons to the default arrow; anything clickable gets the hand. */
+  button:not(:disabled),
+  summary,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-deep);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  /* Accordion open/close. Browsers without ::details-content just toggle instantly. */
+  @media (prefers-reduced-motion: no-preference) {
+    :root {
+      interpolate-size: allow-keywords;
+    }
+
+    details::details-content {
+      block-size: 0;
+      overflow: clip;
+      transition:
+        block-size 0.3s var(--ease-out-soft),
+        content-visibility 0.3s allow-discrete;
+    }
+
+    details[open]::details-content {
+      block-size: auto;
+    }
+  }
+}
+
+/* A blog post's text (lib/markdown.tsx renders it). Written as Markdown in the admin panel, so
+   it is plain elements styled here, from the same tokens as the rest of the site. Nothing in
+   it may widen the page: long words wrap, wide tables scroll inside their own frame. */
+@layer components {
+  .blog-prose {
+    font-size: 1rem;
+    line-height: 1.75;
+    color: var(--color-ink-soft);
+    overflow-wrap: break-word;
+  }
+  @media (width >= 80rem) {
+    .blog-prose {
+      font-size: 1.0625rem;
+    }
+  }
+  .blog-prose > :first-child {
+    margin-top: 0;
+  }
+  .blog-prose :where(p, ul, ol, blockquote, pre, .md-table, hr) {
+    margin-top: 1.25em;
+  }
+  .blog-prose :where(h2) {
+    margin-top: 2.2em;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    scroll-margin-top: calc(var(--header-h) + 1rem);
+  }
+  .blog-prose :where(h3) {
+    margin-top: 1.8em;
+    font-size: 1.1875rem;
+    line-height: 1.35;
+    font-weight: 700;
+    scroll-margin-top: calc(var(--header-h) + 1rem);
+  }
+  .blog-prose :where(h4, h5, h6) {
+    margin-top: 1.6em;
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+  .blog-prose :where(h2, h3, h4) + * {
+    margin-top: 0.6em;
+  }
+  @media (width >= 80rem) {
+    .blog-prose :where(h2) {
+      font-size: 1.75rem;
+    }
+  }
+  .blog-prose :where(a) {
+    font-weight: 500;
+    color: var(--color-brand-deep);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-brand-deep) 35%, transparent);
+    text-underline-offset: 0.18em;
+    transition: text-decoration-color 0.2s;
+  }
+  .blog-prose :where(a:hover) {
+    text-decoration-color: currentColor;
+  }
+  .blog-prose :where(strong) {
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+  .blog-prose :where(ul, ol) {
+    padding-left: 1.4em;
+  }
+  .blog-prose :where(ul) {
+    list-style: disc;
+  }
+  .blog-prose :where(ol) {
+    list-style: decimal;
+  }
+  .blog-prose :where(li) {
+    margin-top: 0.45em;
+    padding-left: 0.2em;
+  }
+  .blog-prose :where(li)::marker {
+    color: var(--color-brand-deep);
+  }
+  .blog-prose :where(ul.contains-task-list) {
+    list-style: none;
+    padding-left: 0.2em;
+  }
+  .blog-prose :where(blockquote) {
+    border-left: 3px solid var(--color-brand-deep);
+    border-radius: 0 var(--radius-btn) var(--radius-btn) 0;
+    background: var(--color-surface);
+    padding: 0.9em 1.2em;
+    color: var(--color-ink);
+  }
+  .blog-prose :where(blockquote > :first-child) {
+    margin-top: 0;
+  }
+  .blog-prose :where(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin-top: 1.5em;
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+  }
+  .blog-prose :where(p > img:only-child) {
+    margin-top: 0;
+  }
+  .blog-prose :where(hr) {
+    border: 0;
+    border-top: 1px solid var(--color-line-strong);
+    margin-block: 2.5em;
+  }
+  .blog-prose :where(code) {
+    font-size: 0.875em;
+    background: var(--color-surface);
+    border-radius: 0.3em;
+    padding: 0.1em 0.35em;
+  }
+  .blog-prose :where(pre) {
+    overflow-x: auto;
+    border-radius: var(--radius-btn-lg);
+    background: var(--color-navy);
+    color: var(--color-line);
+    padding: 1em 1.2em;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  .blog-prose :where(pre code) {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+  }
+  /* Tables scroll sideways in their own frame on narrow screens. */
+  .blog-prose .md-table {
+    overflow-x: auto;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-btn-lg);
+  }
+  .blog-prose :where(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+  .blog-prose :where(th, td) {
+    padding: 0.65em 0.9em;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-line);
+    min-width: 7rem;
+  }
+  .blog-prose :where(th) {
+    background: var(--color-surface);
+    font-weight: 600;
+    color: var(--color-ink);
+    white-space: nowrap;
+  }
+  .blog-prose :where(tr:last-child td) {
+    border-bottom: 0;
+  }
+  .blog-prose :where(.footnotes) {
+    margin-top: 3em;
+    font-size: 0.875rem;
+    color: var(--color-muted);
+  }
+}

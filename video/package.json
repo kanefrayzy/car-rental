@@ -1,0 +1,23 @@
+{
+  "name": "bueno-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/assets.mjs",
+    "dev": "remotion studio",
+    "render": "remotion render Promo-9x16 out/bueno-promo-9x16.mp4 && remotion render Promo-VO-9x16 out/bueno-promo-vo-9x16.mp4",
+    "build": "npm run assets && npm run render",
+    "voice": "node scripts/voiceover.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.536",
+    "@remotion/google-fonts": "4.0.536",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.536"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

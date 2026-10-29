@@ -1,0 +1,176 @@
+{
+  "/images/hero-scene-desktop.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200,
+    1920,
+    2880
+  ],
+  "/images/hero-scene-mobile.webp": [
+    160,
+    256,
+    384,
+    640,
+    780
+  ],
+  "/images/hero-scene-tablet.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200,
+    1600
+  ],
+  "/images/cta-side.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200,
+    1680
+  ],
+  "/images/gallery/charger-front-three-quarter.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200
+  ],
+  "/images/gallery/charger-front.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    896
+  ],
+  "/images/gallery/charger-headlights.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/charger-interior.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1170
+  ],
+  "/images/gallery/charger-left.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/charger-rear-seats.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1170
+  ],
+  "/images/gallery/charger-rear.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/charger-side.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200,
+    1920
+  ],
+  "/images/gallery/full/charger-front-three-quarter.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1200
+  ],
+  "/images/gallery/full/charger-front.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/full/charger-headlights.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/full/charger-interior.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1170
+  ],
+  "/images/gallery/full/charger-left.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/gallery/full/charger-rear-seats.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    1080,
+    1170
+  ],
+  "/images/gallery/full/charger-rear.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ],
+  "/images/photos/charger-tail-light.webp": [
+    160,
+    256,
+    384,
+    640,
+    828,
+    960
+  ]
+}

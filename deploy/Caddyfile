@@ -1,0 +1,43 @@
+# The public entrance: HTTPS for the domain (certificates from Let's Encrypt, renewed by
+# Caddy), then everything on one address:
+#   /api, /be (admin panel) and the admin panel's assets  -> the Laravel container
+#   everything else                            -> the Next.js website
+# One address means no CORS and one certificate. DOMAIN comes from deploy/.env.
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# The API's "refresh the blog pages" call reaches the website over the internal network
+	# only; from outside this path does not exist.
+	handle /internal/* {
+		respond 404
+	}
+
+	# Laravel: the API, the admin panel, Livewire (its path carries a hash, e.g.
+	# /livewire-95ee5c95/update), Filament's published CSS, JS and fonts, and the blog's
+	# pictures (/storage, the public disk).
+	@laravel path /api/* /be /be/* /livewire* /css/filament/* /js/filament/* /fonts/filament/* /filament/* /storage/* /up
+	handle @laravel {
+		reverse_proxy backend:80
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

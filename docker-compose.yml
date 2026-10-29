@@ -1,0 +1,138 @@
+# The whole project in containers: website, booking API, database, and a mail catcher.
+#
+#   docker compose up --build        start everything (first run builds the images)
+#   docker compose down              stop; data is kept
+#   docker compose down --volumes    stop and delete the database and uploaded documents
+#
+# Then open:
+#   http://localhost:3000   the website
+#   http://localhost:8000   the API
+#   http://localhost:8025   every email the API sends (nothing leaves your machine)
+#
+# Settings come from the shell or from a .env file next to this one; see .env.docker.example.
+# These defaults are for a developer's machine, not for production.
+
+name: car-rental
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: rental
+      MYSQL_USER: rental
+      MYSQL_PASSWORD: ${DB_PASSWORD:-rental-local}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root-local}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # Catches all outgoing email and shows it in a web inbox.
+  mail:
+    image: axllent/mailpit:latest
+    ports:
+      - "${MAIL_UI_PORT:-8025}:8025"
+
+  backend:
+    build: ./backend
+    image: car-rental-backend
+    depends_on:
+      db:
+        condition: service_healthy
+      mail:
+        condition: service_started
+    environment: &backend-env
+      APP_NAME: ${APP_NAME:-Bueno Exotics}
+      APP_ENV: ${APP_ENV:-local}
+      APP_DEBUG: "false"
+      # Used in the document links inside emails, so it must be the address the owner opens.
+      APP_URL: http://localhost:${API_PORT:-8000}
+      # Empty: the container creates a key once and keeps it in the storage volume.
+      APP_KEY: ${APP_KEY:-}
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: rental
+      DB_USERNAME: rental
+      DB_PASSWORD: ${DB_PASSWORD:-rental-local}
+      CACHE_STORE: database
+      # Queued jobs wait in the database for the `queue` container.
+      QUEUE_CONNECTION: database
+      MAIL_MAILER: smtp
+      MAIL_HOST: mail
+      MAIL_PORT: 1025
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-bookings@example.com}
+      FRONTEND_URL: http://localhost:${WEB_PORT:-3000}
+      RENTAL_OWNER_EMAIL: ${RENTAL_OWNER_EMAIL:-owner@example.com}
+      RENTAL_DEPOSIT_USD: ${RENTAL_DEPOSIT_USD:-1000}
+      # Admin panel account at /admin, created on first start when both are set.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-owner@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      STRIPE_SECRET: ${STRIPE_SECRET:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Days to keep customers' licences and insurance after the rental. Matches the privacy page.
+      RENTAL_DOCUMENT_RETENTION_DAYS: ${RENTAL_DOCUMENT_RETENTION_DAYS:-180}
+      # The "Leave a review" link in the thank-you email after a return. Empty: not sent.
+      GOOGLE_REVIEW_URL: ${GOOGLE_REVIEW_URL:-}
+      # Hours from "Mark as returned" to that email; set it low to try the email out.
+      RENTAL_REVIEW_DELAY_HOURS: ${RENTAL_REVIEW_DELAY_HOURS:-3}
+      # The blog: the API asks the website to refresh its blog pages after a change.
+      BLOG_REVALIDATE_URL: http://frontend:3000/internal/revalidate
+      BLOG_REVALIDATE_SECRET: ${BLOG_REVALIDATE_SECRET:-local-blog-secret}
+    ports:
+      - "${API_PORT:-8000}:80"
+    volumes:
+      # Uploaded licences and insurance cards, logs, and the generated app key.
+      - backend-storage:/var/www/html/storage
+
+  # Nightly jobs (deleting old customer documents). Same image and settings as the API.
+  scheduler:
+    image: car-rental-backend
+    depends_on:
+      - backend
+    environment:
+      <<: *backend-env
+      APP_ROLE: scheduler
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - backend-storage:/var/www/html/storage
+
+  # Runs queued jobs (the review request after a return). Same image and settings as the API.
+  queue:
+    image: car-rental-backend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      <<: *backend-env
+      APP_ROLE: queue
+    command: ["php", "artisan", "queue:work", "--sleep=5", "--tries=3", "--max-time=3600", "--memory=128"]
+    volumes:
+      - backend-storage:/var/www/html/storage
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # The browser calls the API directly, so this is the address as seen from the host.
+        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}/api
+        # Microsoft Clarity, only if CLARITY_PROJECT_ID is set. Empty by default: no recordings locally.
+        NEXT_PUBLIC_CLARITY_ID: ${CLARITY_PROJECT_ID:-}
+    environment:
+      # The site's server reads the daily price from the API over the internal network
+      # (lib/catalog.ts), so a price changed in the admin panel shows on the site.
+      API_INTERNAL_URL: http://backend/api
+      BLOG_REVALIDATE_SECRET: ${BLOG_REVALIDATE_SECRET:-local-blog-secret}
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  db-data:
+  backend-storage:
