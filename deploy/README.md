@@ -22,25 +22,25 @@ Two things are different from a developer's machine because of the server's virt
 
 ## Deploying a change
 
-From the repo root on a developer machine:
+Since 2026-10-30 the code goes through GitHub (https://github.com/kanefrayzy/car-rental, public). `/opt/bueno` on the server is a git checkout of `main` (sparse: `backend`, `frontend`, `deploy`, `scripts`); it pulls over HTTPS. `deploy/.env` is not in the repository and stays on the server.
+
+Commit, then from the repo root on a developer machine:
 
 ```bash
-# 1. Pack what changed (never .env files, node_modules, backend/vendor or builds).
-#    Exclude backend/vendor by path: a bare --exclude=vendor also drops
-#    backend/resources/views/vendor (the email theme) and emails go out unstyled.
-tar -czf bueno.tgz --exclude=node_modules --exclude=.next --exclude=backend/vendor --exclude=.env \
-  --exclude='backend/storage/*/*' --exclude='backend/database/*.sqlite' backend frontend deploy
-# 2. Copy it up and unpack over the old code (deploy/.env on the server is kept)
-scp bueno.tgz root@67.223.117.17:/root/
-ssh root@67.223.117.17 'cd /opt/bueno && rm -rf backend frontend && tar -xzf /root/bueno.tgz && rm /root/bueno.tgz \
-  && mkdir -p backend/storage/framework/cache/data backend/storage/framework/sessions backend/storage/framework/views \
-     backend/storage/logs backend/storage/app/public backend/storage/app/private backend/bootstrap/cache \
-  && cd deploy && docker compose up -d --build'
-# The mkdir matters: the archive leaves storage/ empty, and without these folders the API
-# image fails to build ("Please provide a valid cache path"). The running site is untouched then.
+npm run deploy                 # push main, then the server pulls it and rebuilds what changed
+npm run deploy -- frontend     # force a part too: frontend, backend, caddy or all
 ```
 
-If `deploy/Caddyfile` changed, run `docker compose restart caddy` afterwards. The file is bind-mounted, and tar puts a new file in its place, so the running Caddy keeps reading the old copy; `caddy reload` does not help here (2026-10-21).
+`scripts/deploy.mjs` refuses uncommitted changes (the server would not get them) and any branch other than `main`, pushes, then runs `deploy/deploy.sh` on the server over `ssh bueno`. That script can also be run on the server itself (`/opt/bueno/deploy/deploy.sh [part]`). It:
+
+- fetches `main` and resets the checkout to it (the server never has its own changes);
+- rebuilds from the changed paths: `frontend/` the website, `backend/` the API image (backend, scheduler, queue), `deploy/docker-compose.yml` everything; `deploy/Caddyfile` restarts Caddy (the file is bind-mounted and git puts a new file in its place, so the running Caddy keeps the old copy; `caddy reload` does not help, 2026-10-21);
+- removes dangling images (the 40 GB disk was 79% full on 2026-10-30);
+- waits until the home page and `/api/settings` answer, then prints the containers' status.
+
+Filament's published CSS, JS and fonts (`backend/public/{css,js,fonts}/filament`) are committed on purpose: the API image does not publish them, so without them the admin panel loses its styles.
+
+To roll back, revert the commit and deploy again (`git revert <sha> && npm run deploy`). The code as it was just before the switch to git is in `/root/bueno-pre-git-2026-10-29.tgz` on the server.
 
 The API container runs the database migrations on every start. Building the website takes a few minutes on this server.
 
