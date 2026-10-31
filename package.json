@@ -11,6 +11,7 @@
     "shoot": "node scripts/shoot.mjs",
     "check": "node scripts/check-interactions.mjs",
     "check:analytics": "node scripts/check-analytics.mjs",
+    "check:back": "node scripts/check-back-button.mjs",
     "deploy": "node scripts/deploy.mjs"
   },
   "devDependencies": {

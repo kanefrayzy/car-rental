@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { CheckIcon } from "@/components/ui/icons";
 import { site } from "@/config/site";
 import { ApiError, uploadDocuments, type BookingDetails, type BookingLink } from "@/lib/api";
+import { useResetOnLeave } from "@/lib/useResetOnLeave";
 import { validateFile } from "@/lib/validation";
 import { FileDropzone } from "./FileDropzone";
 
@@ -28,11 +29,18 @@ export function DocumentsForm({
   const [files, setFiles] = useState<Record<Kind, File | null>>({ license: null, insurance: null });
   const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({});
   const [busy, setBusy] = useState(false);
+  // Set at once on submit (state is a render late): a double click uploads once.
+  const sending = useRef(false);
+  // Back on this page, or restored from the back-forward cache: never with the spinner still on.
+  useResetOnLeave(() => {
+    sending.current = false;
+    setBusy(false);
+  });
   const [submitError, setSubmitError] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (sending.current) return;
 
     // A document already on file may be left as it is; a missing one is required.
     const nextErrors: Partial<Record<Kind, string>> = {};
@@ -43,6 +51,7 @@ export function DocumentsForm({
     if (Object.values(nextErrors).some(Boolean)) return;
     if (!files.license && !files.insurance) return;
 
+    sending.current = true;
     setBusy(true);
     setSubmitError("");
     try {
@@ -59,6 +68,7 @@ export function DocumentsForm({
               : `The upload didn’t go through. Try again or call ${site.phone.display}.`,
       );
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   };

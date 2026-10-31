@@ -149,30 +149,90 @@ function errorMessage(body: ErrorBody | null, status: number): string {
   return `Something went wrong on our side. Try again or call ${site.phone.display}.`;
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+/**
+ * The form gave up on the request itself (the visitor left the page): nothing to show.
+ * Callers check `isAborted(error)` and return quietly.
+ */
+export class RequestAborted extends Error {
+  constructor() {
+    super("The request was cancelled.");
+    this.name = "RequestAborted";
+  }
+}
+
+export const isAborted = (error: unknown) => error instanceof RequestAborted;
+
+export type RequestOptions = {
+  /** Aborts the request (the form's own controller): it then rejects with RequestAborted. */
+  signal?: AbortSignal;
+};
+
+type Limits = {
+  /** Gives up after this long with `timeoutMessage` (an ApiError with status 0). */
+  timeoutMs?: number;
+  timeoutMessage?: string;
+  /** Shown when the request never reached the server (offline, blocked). */
+  networkMessage?: string;
+};
+
+async function request<T>(path: string, init: RequestInit, { signal, timeoutMs, timeoutMessage, networkMessage }: RequestOptions & Limits = {}): Promise<T> {
+  // One controller for both reasons to stop: the form's signal and the time limit.
+  // (AbortSignal.any and AbortSignal.timeout are missing on iOS before 16 and 17.4.)
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = timeoutMs
+    ? setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs)
+    : undefined;
+  const cancel = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+
   let response: Response;
+  let body: T | ErrorBody | null;
   try {
     response = await fetch(`${API_URL}${path}`, {
       ...init,
+      signal: controller.signal,
       headers: { Accept: "application/json", ...init.headers },
     });
+    // Read inside the time limit too: a body that never finishes is no answer either.
+    body = (await response.json().catch(() => null)) as T | ErrorBody | null;
+    if (controller.signal.aborted) throw controller.signal.reason;
   } catch {
-    throw new ApiError(`We couldn’t reach the server. Check your connection and try again.`);
+    if (timedOut) {
+      throw new ApiError(timeoutMessage ?? `Our server took too long to answer. Try again or call ${site.phone.display}.`);
+    }
+    if (signal?.aborted) throw new RequestAborted();
+    throw new ApiError(networkMessage ?? `We couldn’t reach the server. Check your connection and try again.`);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", cancel);
   }
 
-  const body = (await response.json().catch(() => null)) as T | ErrorBody | null;
   if (!response.ok) {
     throw new ApiError(errorMessage(body as ErrorBody | null, response.status), response.status);
   }
   return body as T;
 }
 
-const postJson = <T>(path: string, data?: unknown) =>
-  request<T>(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: data === undefined ? undefined : JSON.stringify(data),
-  });
+const postJson = <T>(path: string, data?: unknown, options?: RequestOptions & Limits) =>
+  request<T>(
+    path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: data === undefined ? undefined : JSON.stringify(data),
+    },
+    options,
+  );
+
+/** The mock's stand-in for a request the form cancelled. */
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new RequestAborted();
+}
 
 // ---------------------------------------------------------------------------
 // Mock (no NEXT_PUBLIC_API_URL)
@@ -185,8 +245,9 @@ const MOCK_BOOKED_RANGES: [IsoDate, IsoDate][] = [];
 
 const delay = (ms = MOCK_LATENCY_MS) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function mockAvailability(request: AvailabilityRequest): Promise<AvailabilityResult> {
+async function mockAvailability(request: AvailabilityRequest, signal?: AbortSignal): Promise<AvailabilityResult> {
   await delay();
+  throwIfAborted(signal);
   const car = cars.find((item) => item.slug === request.carSlug);
   if (!car) throw new ApiError("We couldn’t find that car.", 422);
 
@@ -280,9 +341,16 @@ function mockBookingDetails(link: BookingLink): BookingDetails {
 // Public functions
 // ---------------------------------------------------------------------------
 
+/** How long a form waits for an answer before it says so (user, 2026-10-31: 15 s). */
+export const AVAILABILITY_TIMEOUT_MS = 15_000;
+
 // POST /api/availability
-export function checkAvailability(data: AvailabilityRequest): Promise<AvailabilityResult> {
-  return usesRealApi ? postJson("/availability", data) : mockAvailability(data);
+export function checkAvailability(data: AvailabilityRequest, { signal }: RequestOptions = {}): Promise<AvailabilityResult> {
+  // A check books nothing, so a timeout or a lost connection just asks to try again.
+  const failed = `Couldn’t check dates. Try again or call us at ${site.phone.display}.`;
+  return usesRealApi
+    ? postJson("/availability", data, { signal, timeoutMs: AVAILABILITY_TIMEOUT_MS, timeoutMessage: failed, networkMessage: failed })
+    : mockAvailability(data, signal);
 }
 
 type ApiBookingResult = Omit<BookingResult, "link"> & {
@@ -318,7 +386,12 @@ export async function submitBookingRequest(data: BookingRequest): Promise<Bookin
     };
   }
 
-  const result = await postJson<ApiBookingResult>("/bookings", data);
+  const result = await postJson<ApiBookingResult>("/bookings", data, {
+    // Longer than a check: the API stores the request and queues two emails. No answer does not
+    // mean nothing arrived, so the message says how to find out before sending it twice.
+    timeoutMs: 30_000,
+    timeoutMessage: `We didn’t get an answer in time. Your request may still have arrived: check your email in a minute, or call ${site.phone.display} before sending it again.`,
+  });
   const { booking, expires, signature } = result.link;
   return { ...result, link: { bookingId: booking, expires, signature } };
 }
@@ -335,7 +408,7 @@ export async function getBooking(link: BookingLink): Promise<BookingDetails> {
     await delay();
     return mockBookingDetails(link);
   }
-  return request(bookingApiPath(link), { method: "GET" });
+  return request(bookingApiPath(link), { method: "GET" }, { timeoutMs: 15_000 });
 }
 
 // POST /api/bookings/{id}/upload?expires=…&signature=… (multipart/form-data)
@@ -366,7 +439,7 @@ export async function createRentalPaymentIntent(bookingId: string): Promise<Depo
     await delay();
     return { bookingId, amountUsd: 0, clientSecret: null };
   }
-  return postJson(`/bookings/${encodeURIComponent(bookingId)}/rental-payment`);
+  return postJson(`/bookings/${encodeURIComponent(bookingId)}/rental-payment`, undefined, { timeoutMs: 15_000 });
 }
 
 // POST /api/bookings/{id}/deposit
@@ -375,7 +448,7 @@ export async function createDepositIntent(bookingId: string): Promise<DepositInt
     await delay();
     return { bookingId, amountUsd: site.booking.depositUsd, clientSecret: null };
   }
-  return postJson(`/bookings/${encodeURIComponent(bookingId)}/deposit`);
+  return postJson(`/bookings/${encodeURIComponent(bookingId)}/deposit`, undefined, { timeoutMs: 15_000 });
 }
 
 export type ContactRequest = {
@@ -400,5 +473,8 @@ export async function sendContactMessage(data: ContactRequest): Promise<void> {
     await delay(900);
     return;
   }
-  await postJson("/contact", data);
+  await postJson("/contact", data, {
+    timeoutMs: 20_000,
+    timeoutMessage: `We didn’t get an answer in time. Your message may still have arrived; to be sure, call or text ${site.phone.display}.`,
+  });
 }

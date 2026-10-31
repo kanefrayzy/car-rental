@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "@/components/ui/icons";
 import { contactTopics, type ContactTopic } from "@/config/content";
 import { site } from "@/config/site";
 import { track } from "@/lib/analytics";
 import { ApiError, sendContactMessage } from "@/lib/api";
+import { useResetOnLeave } from "@/lib/useResetOnLeave";
 import { formatUsPhone } from "@/lib/validation";
 
 const MESSAGE_MAX = 2000;
@@ -58,6 +59,13 @@ export function ContactForm() {
   const [company, setCompany] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
+  // Set at once on submit (state is a render late): a double click sends one message.
+  const sending = useRef(false);
+  // Back on this page, or restored from the back-forward cache: never with "Sending…" still on.
+  useResetOnLeave(() => {
+    sending.current = false;
+    setBusy(false);
+  });
   const [problem, setProblem] = useState("");
   const [sent, setSent] = useState(false);
 
@@ -77,11 +85,21 @@ export function ContactForm() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (sending.current) return;
     const nextErrors = validate(values);
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) return;
+    if (Object.keys(nextErrors).length) {
+      // Every problem is shown at once; the first one gets the focus.
+      const form = event.currentTarget as HTMLFormElement;
+      requestAnimationFrame(() => {
+        const target = form.querySelector<HTMLElement>('[aria-invalid="true"]');
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+      return;
+    }
 
+    sending.current = true;
     setBusy(true);
     setProblem("");
     try {
@@ -96,6 +114,7 @@ export function ContactForm() {
           : `We couldn’t send your message. Call or text us at ${site.phone.display}.`,
       );
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   };

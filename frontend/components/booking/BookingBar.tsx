@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/Button";
 import { ArrowRightIcon } from "@/components/ui/icons";
 import type { Occasion } from "@/config/content";
 import { site } from "@/config/site";
-import { ApiError, checkAvailability } from "@/lib/api";
+import { ApiError, checkAvailability, isAborted } from "@/lib/api";
 import { minutesOf, type TimeSlot } from "@/lib/time";
+import { useResetOnLeave } from "@/lib/useResetOnLeave";
 import { useBusinessNow } from "@/lib/useToday";
 import { validateTrip, type IsoDate, type Trip } from "@/lib/validation";
 import { DateField, openDatePicker } from "./DateField";
@@ -45,6 +46,16 @@ export function BookingBar({
   });
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [invalid, setInvalid] = useState<Partial<Record<keyof Trip, boolean>>>({});
+  // The check in flight: one at a time, and cancelled when the visitor leaves the page.
+  const inFlight = useRef<AbortController | null>(null);
+
+  // Back from the booking page shows this page as it was (Next keeps it alive, or the browser's
+  // back-forward cache does): never with the spinner still on.
+  useResetOnLeave(() => {
+    inFlight.current?.abort();
+    inFlight.current = null;
+    setStatus((current) => (current.kind === "checking" ? { kind: "idle" } : current));
+  });
 
   const update = (next: Partial<Trip>) => {
     setTrip((current) => ({ ...current, ...next }));
@@ -62,7 +73,8 @@ export function BookingBar({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!now) return;
+    // A second click while the first check is still out sends nothing.
+    if (!now || inFlight.current) return;
     const errors = validateTrip(trip, now);
     const message = errors.pickupDate ?? errors.pickupTime ?? errors.returnDate ?? errors.returnTime;
     if (message) {
@@ -74,16 +86,19 @@ export function BookingBar({
       return;
     }
 
+    const controller = new AbortController();
+    inFlight.current = controller;
     setStatus({ kind: "checking" });
+    let next: Status = { kind: "idle" };
     try {
-      const result = await checkAvailability({ carSlug, ...trip });
+      const result = await checkAvailability({ carSlug, ...trip }, { signal: controller.signal });
       if (!result.available) {
         setInvalid({ pickupDate: true, returnDate: true });
-        setStatus({ kind: "error", message: "Those dates are already booked. Try different dates." });
+        next = { kind: "error", message: "Those dates are already booked. Try different dates." };
         return;
       }
-      // Free: continue on the booking page. The status stays "checking", so the button keeps
-      // its spinner while the page opens.
+      // Free: continue on the booking page. The button goes back to rest at once (finally): a
+      // spinner kept "while the page opens" came back with Back and stayed (2026-10-31).
       router.push(
         `/book/${carSlug}?${new URLSearchParams({
           pickup: trip.pickupDate,
@@ -94,13 +109,20 @@ export function BookingBar({
         })}`,
       );
     } catch (error) {
-      setStatus({
+      if (isAborted(error)) return;
+      next = {
         kind: "error",
         message:
           error instanceof ApiError
             ? error.message
-            : `We couldn’t check availability. Try again or call ${site.phone.display}.`,
-      });
+            : `Couldn’t check dates. Try again or call us at ${site.phone.display}.`,
+      };
+    } finally {
+      // Cancelled because the visitor left: the reset has already put everything to rest.
+      if (inFlight.current === controller) {
+        inFlight.current = null;
+        setStatus(next);
+      }
     }
   };
 

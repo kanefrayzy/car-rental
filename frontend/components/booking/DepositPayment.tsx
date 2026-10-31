@@ -1,14 +1,15 @@
 "use client";
 
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { loadStripe, type Stripe } from "@stripe/stripe-js";
-import { useEffect, useState } from "react";
+import { loadStripe, type PaymentIntentResult, type Stripe } from "@stripe/stripe-js";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { CheckIcon } from "@/components/ui/icons";
 import { site } from "@/config/site";
 import { usd } from "@/config/terms";
 import { trackOnce } from "@/lib/analytics";
 import { ApiError, createDepositIntent, createRentalPaymentIntent } from "@/lib/api";
+import { useResetOnLeave } from "@/lib/useResetOnLeave";
 
 // Publishable key, compiled in at build time. Without it (or without Stripe on the API) the
 // site says a payment link will follow by email, as before.
@@ -134,21 +135,38 @@ function PayForm({ label, kind, onPaid }: { label: string; kind: "deposit" | "re
   const elements = useElements();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Set at once on click (state is a render late): a double click confirms once.
+  const paying = useRef(false);
+  // A bank check that sends the customer away and Back to this page (back-forward cache), or
+  // leaving the page: never with "Paying…" still on.
+  useResetOnLeave(() => {
+    paying.current = false;
+    setBusy(false);
+  });
 
   const pay = async () => {
-    if (!stripe || !elements || busy) return;
+    if (!stripe || !elements || paying.current) return;
+    paying.current = true;
     setBusy(true);
     setError("");
 
-    // The API only offers payment methods that need no redirect, so this resolves here.
-    const result = await stripe.confirmPayment({
-      elements,
-      redirect: "if_required",
-      // If a bank check sends the customer away anyway, they come back with Stripe's
-      // redirect_status and this `paid`, which BookingTracker counts.
-      confirmParams: { return_url: returnUrl(kind) },
-    });
-    setBusy(false);
+    let result: PaymentIntentResult;
+    try {
+      // The API only offers payment methods that need no redirect, so this resolves here.
+      result = await stripe.confirmPayment({
+        elements,
+        redirect: "if_required",
+        // If a bank check sends the customer away anyway, they come back with Stripe's
+        // redirect_status and this `paid`, which BookingTracker counts.
+        confirmParams: { return_url: returnUrl(kind) },
+      });
+    } catch {
+      setError(`The payment didn’t go through. Try again or call ${site.phone.display}.`);
+      return;
+    } finally {
+      paying.current = false;
+      setBusy(false);
+    }
 
     if (result.error) {
       setError(result.error.message ?? "The payment didn’t go through. Try another card.");

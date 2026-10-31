@@ -10,9 +10,10 @@ import { bookingJourneyFor, isOccasion, occasionLabel, occasions, type Occasion 
 import { site } from "@/config/site";
 import { priceWithTax, rentalTerms, usd } from "@/config/terms";
 import { track } from "@/lib/analytics";
-import { ApiError, bookingPagePath, checkAvailability, submitBookingRequest } from "@/lib/api";
+import { ApiError, bookingPagePath, checkAvailability, isAborted, submitBookingRequest } from "@/lib/api";
 import { saveBooking } from "@/lib/savedBooking";
 import { billedDays, formatTime, isTimeSlot, minutesOf, type TimeSlot } from "@/lib/time";
+import { useResetOnLeave } from "@/lib/useResetOnLeave";
 import { useBusinessNow } from "@/lib/useToday";
 import {
   formatDate,
@@ -33,7 +34,10 @@ type Availability =
   | { state: "idle" }
   | { state: "checking" }
   | { state: "available" }
-  | { state: "unavailable"; message: string };
+  | { state: "unavailable"; message: string }
+  // The check itself failed (timeout, no connection, server error): not a "no", so it does not
+  // block the request (the API checks again), and the line offers to try again.
+  | { state: "error"; message: string };
 
 /**
  * What the visitor has typed, kept in this browser (localStorage) until the request is sent,
@@ -78,8 +82,6 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
   const today = now?.date ?? "";
   const formId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
-  const datesRef = useRef<HTMLDivElement>(null);
-  const termsRef = useRef<HTMLInputElement>(null);
 
   const [trip, setTripState] = useState<Trip>(EMPTY_TRIP);
   const [contact, setContact] = useState<ContactValues>({ name: "", phone: "", email: "" });
@@ -90,7 +92,12 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
   const [termsError, setTermsError] = useState("");
   const [availability, setAvailability] = useState<Availability>({ state: "idle" });
   const [busy, setBusy] = useState(false);
+  // Set at once on submit (state is a render late): a double click sends one request.
+  const sending = useRef(false);
   const [submitError, setSubmitError] = useState("");
+  // Bumped to run the availability check again ("Try again", or back on the page).
+  const [recheck, setRecheck] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
   const [restored, setRestored] = useState(false);
   const checkCount = useRef(0);
   // Analytics (booking funnel steps): where the dates came from, and what was already counted.
@@ -159,6 +166,8 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
     }
 
     const id = ++checkCount.current;
+    // Cancelled when the dates change again or the page is left; only the latest answer counts.
+    const controller = new AbortController();
     setAvailability({ state: "checking" });
     // booking_dates_selected: once per trip, with the answer. No dates or personal data in it.
     const counted = (availability: "available" | "unavailable" | "error") => {
@@ -174,7 +183,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
       countDetails(detailsInView.current);
     };
     const timer = setTimeout(() => {
-      checkAvailability({ carSlug: car.slug, pickupDate, pickupTime, returnDate, returnTime })
+      checkAvailability({ carSlug: car.slug, pickupDate, pickupTime, returnDate, returnTime }, { signal: controller.signal })
         .then((result) => {
           if (id !== checkCount.current) return;
           counted(result.available ? "available" : "unavailable");
@@ -185,19 +194,39 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
           );
         })
         .catch((error) => {
-          if (id !== checkCount.current) return;
+          if (isAborted(error) || id !== checkCount.current) return;
           counted("error");
           setAvailability({
-            state: "unavailable",
+            state: "error",
             message:
               error instanceof ApiError
                 ? error.message
-                : `We couldn’t check availability. Try again or call ${site.phone.display}.`,
+                : `Couldn’t check dates. Try again or call us at ${site.phone.display}.`,
           });
         });
     }, 250);
-    return () => clearTimeout(timer);
-  }, [car.slug, pickupDate, pickupTime, returnDate, returnTime, tripReady]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [car.slug, pickupDate, pickupTime, returnDate, returnTime, tripReady, recheck]);
+
+  // Back on this page after sending (Next keeps it alive) or from the back-forward cache: the
+  // button is ready again, and the dates are checked afresh (they may have been taken since).
+  useResetOnLeave(() => {
+    sending.current = false;
+    setBusy(false);
+    setRecheck((count) => count + 1);
+  });
+
+  /** After a refused submit: the first field that needs attention, in page order, in view and focused. */
+  const focusFirstInvalid = () =>
+    requestAnimationFrame(() => {
+      const target = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus({ preventScroll: true });
+    });
 
   useEffect(() => {
     const section = nameRef.current?.closest("section");
@@ -244,29 +273,26 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy) return;
+    if (sending.current || !now) return;
 
-    if (!now) return;
+    // The button is never disabled for a missing field: a click shows every problem at once
+    // and takes the visitor to the first one (a disabled button reads as a dead click).
     const nextDateErrors = validateTrip(trip, now);
     const nextContactErrors = validateContact(contact);
     setDateErrors(nextDateErrors);
     setContactErrors(nextContactErrors);
     setTermsError(acceptTerms ? "" : "Agree to the Rental Terms to send your request.");
-
-    // Take the visitor to the first thing that needs attention.
-    if (Object.keys(nextDateErrors).length || availability.state === "unavailable") {
-      datesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-    if (Object.values(nextContactErrors).some(Boolean)) {
-      nameRef.current?.closest("section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (!acceptTerms) {
-      termsRef.current?.focus();
+    if (
+      Object.keys(nextDateErrors).length ||
+      availability.state === "unavailable" ||
+      Object.values(nextContactErrors).some(Boolean) ||
+      !acceptTerms
+    ) {
+      focusFirstInvalid();
       return;
     }
 
+    sending.current = true;
     setBusy(true);
     setSubmitError("");
     try {
@@ -276,15 +302,19 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
       track("booking_submit", { value: totalUsd, currency: "USD", occasion: occasion || undefined });
       router.push(bookingPagePath(result.link, { new: "1" }));
     } catch (error) {
-      setBusy(false);
       if (error instanceof ApiError && error.status === 409) {
         setAvailability({ state: "unavailable", message: error.message });
-        datesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        focusFirstInvalid();
         return;
       }
       setSubmitError(
         error instanceof ApiError ? error.message : `We couldn’t send your request. Try again or call ${site.phone.display}.`,
       );
+    } finally {
+      // Also after a successful send: the booking page opens on its own, and a "Sending…" kept
+      // until then came back with Back and stayed (2026-10-31).
+      sending.current = false;
+      setBusy(false);
     }
   };
 
@@ -308,7 +338,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_23rem] lg:gap-8 xl:grid-cols-[minmax(0,1fr)_26rem] xl:gap-12">
-      <form id="booking-form" onSubmit={submit} noValidate data-clarity-mask="true" className="grid gap-4 sm:gap-5">
+      <form ref={formRef} id="booking-form" onSubmit={submit} noValidate data-clarity-mask="true" className="grid gap-4 sm:gap-5">
         <div className="flex items-center gap-4 rounded-card border border-line bg-card p-3 shadow-card lg:hidden">
           <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-btn-lg bg-surface sm:w-32">
             <Image src={carImage(car)} alt="" fill sizes="8rem" className="object-cover" />
@@ -327,7 +357,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
           title="Choose your dates and times"
           intro={`Pick-up and return from ${formatTime(open)} to ${formatTime(close)}, New York time.`}
         >
-          <div ref={datesRef} className="grid gap-3">
+          <div className="grid gap-3">
             <TripRow
               dateError={dateErrors.pickupDate}
               timeError={dateErrors.pickupTime}
@@ -388,7 +418,11 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
               )}
             />
           </div>
-          <AvailabilityLine availability={availability} days={datesValid ? days : 0} />
+          <AvailabilityLine
+            availability={availability}
+            days={datesValid ? days : 0}
+            onRetry={() => setRecheck((count) => count + 1)}
+          />
           {/* Phones and tablets: the total right under the dates (user, 2026-10-25: people from ads
               picked dates and left at Driver details, with the price still further down). The side
               panel shows the same quote from lg up. Free dates only. */}
@@ -441,7 +475,6 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
 
           <label className="mt-5 flex cursor-pointer items-start gap-3 text-[0.9375rem] text-ink">
             <input
-              ref={termsRef}
               type="checkbox"
               checked={acceptTerms}
               onChange={(event) => {
@@ -601,7 +634,15 @@ function TripRow({
 const carImage = (car: Car) =>
   car.gallery.find((image) => image.src.includes("three-quarter"))?.src ?? car.gallery[0].src;
 
-function AvailabilityLine({ availability, days }: { availability: Availability; days: number }) {
+function AvailabilityLine({
+  availability,
+  days,
+  onRetry,
+}: {
+  availability: Availability;
+  days: number;
+  onRetry: () => void;
+}) {
   // A live region, so screen readers hear the result of the check.
   return (
     <p role="status" className="mt-3.5 flex min-h-6 items-center gap-2 text-sm">
@@ -622,6 +663,18 @@ function AvailabilityLine({ availability, days }: { availability: Availability; 
         </>
       )}
       {availability.state === "unavailable" && <span className="font-medium text-danger">{availability.message}</span>}
+      {availability.state === "error" && (
+        <span className="font-medium text-danger">
+          {availability.message}{" "}
+          <button
+            type="button"
+            onClick={onRetry}
+            className="font-semibold text-brand-deep underline underline-offset-2 hover:no-underline"
+          >
+            Try again
+          </button>
+        </span>
+      )}
       {availability.state === "idle" && (
         <span className="text-muted">Choose both dates to check availability.</span>
       )}
