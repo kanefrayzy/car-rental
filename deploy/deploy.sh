@@ -48,8 +48,10 @@ main() {
     [[ "$targets" == *" backend "* ]] && services+=" backend scheduler queue"
     if [ -n "$services" ]; then
       echo "Rebuilding:$services"
+      # --no-deps: the website depends on the API, and without it a website-only deploy also
+      # rebuilt and restarted the API (a few seconds of 502 on 2026-10-31).
       # shellcheck disable=SC2086
-      docker compose up -d --build $services
+      docker compose up -d --build --no-deps $services
     fi
   fi
   # The Caddyfile is bind-mounted and git replaces the file, so Caddy keeps the old copy until
