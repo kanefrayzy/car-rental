@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BlogTeaser } from "@/components/sections/BlogTeaser";
 import { Contact } from "@/components/sections/Contact";
 import { CtaBanner } from "@/components/sections/CtaBanner";
 import { Faq } from "@/components/sections/Faq";
@@ -35,6 +36,7 @@ export default function Home() {
         <Requirements />
         <Location />
         <Faq />
+        <BlogTeaser />
         <Contact />
         <CtaBanner />
       </main>

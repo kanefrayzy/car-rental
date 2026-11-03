@@ -293,6 +293,7 @@ const crops = [
     "car-photoshoot-tips-long-island": ["rearSunset", { left: 0, top: 465, width: 960, height: 540 }],
     "scenic-drives-on-long-island": ["side", { left: 0, top: 360, width: 960, height: 540 }],
     "how-to-rent-an-exotic-car-on-long-island": ["interior", { left: 0, top: 500, width: 1170, height: 658 }],
+    "does-car-insurance-cover-exotic-car-rental": ["rear", { left: 0, top: 345, width: 960, height: 540 }],
   }).map(([slug, [name, region]]) => ({
     out: join(srcDir, "blog-covers", `${slug}.webp`),
     needs: [source(name)],

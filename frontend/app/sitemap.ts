@@ -13,7 +13,7 @@ import { absoluteUrl } from "@/lib/seo";
  * service and area pages keep theirs in config/services.ts and config/locations.ts.
  */
 const updated = {
-  home: "2026-10-20",
+  home: "2026-11-03",
   services: "2026-10-19",
   locations: "2026-10-19",
   contact: "2026-10-19",

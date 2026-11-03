@@ -6,8 +6,9 @@ import { services } from "@/config/services";
 import { nav } from "@/config/site";
 
 // Sections in page order. "location" has no link of its own; listing it keeps the
-// Requirements link from staying highlighted while the map is on screen.
-const SECTION_IDS = ["the-car", "occasions", "how-it-works", "requirements", "location", "faq", "contact"];
+// Requirements link from staying highlighted while the map is on screen. "blog" (the newest
+// posts) lights up the Blog link, which leads to /blog.
+const SECTION_IDS = ["the-car", "occasions", "how-it-works", "requirements", "location", "faq", "blog", "contact"];
 
 /**
  * The id of the section the visitor is reading, or "" above the first one. Only on the home
@@ -63,7 +64,7 @@ export function NavLinks() {
         const current =
           item.href === active ||
           (item.href === "/services" && active.startsWith("/services/")) ||
-          (item.href === "/blog" && active.startsWith("/blog/"));
+          (item.href === "/blog" && (active.startsWith("/blog/") || active === "/#blog"));
         return (
           <li key={item.href} className={item.href === "/services" ? "group relative" : undefined}>
             <a
