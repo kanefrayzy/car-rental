@@ -20,6 +20,8 @@ Two things are different from a developer's machine because of the server's virt
 - **MariaDB 11.4 instead of MySQL 8.4.** The `mysql:8.4` image stops with "Fatal glibc error: CPU does not support x86-64-v2". Laravel uses its `mariadb` driver.
 - **No image resizing on the server.** sharp, which Next's image optimizer needs, cannot load there (neither the native build nor the WebAssembly one: "Wasm SIMD unsupported"). The site's images are resized in advance by `scripts/images.mjs` into `frontend/public/images/w/`, and `frontend/lib/imageLoader.ts` picks the right file. After changing a site image, run `node scripts/images.mjs` before deploying.
 
+**A second site shares the server (since 2026-11-03): https://buenolandscapinginc.com.** It is a separate project (local folder `bueno-landscaping`, deployed with its own `deploy/deploy.sh`), running as one container from `/opt/landscaping/docker-compose.yml`, joined to this project's `bueno_default` network under the name `landscaping`. This Caddy serves its HTTPS too: see the second block in `deploy/Caddyfile`, and keep it when editing that file. `docker compose down` here removes the shared network; after that, run `cd /opt/landscaping && docker compose up -d` as well.
+
 ## Deploying a change
 
 Since 2026-10-30 the code goes through GitHub (https://github.com/kanefrayzy/car-rental, public). `/opt/bueno` on the server is a git checkout of `main` (sparse: `backend`, `frontend`, `deploy`, `scripts`); it pulls over HTTPS. `deploy/.env` is not in the repository and stays on the server.

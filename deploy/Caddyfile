@@ -41,3 +41,28 @@ www.{$DOMAIN} {
 		format console
 	}
 }
+
+# buenolandscapinginc.com: a separate site on the same server (its own Docker project in
+# /opt/landscaping, not in this repository). Its container joins this project's network as
+# `landscaping`. If it is down, only that domain answers 502.
+www.buenolandscapinginc.com {
+	redir https://buenolandscapinginc.com{uri} permanent
+}
+
+buenolandscapinginc.com {
+	encode zstd gzip
+
+	reverse_proxy landscaping:3000
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
