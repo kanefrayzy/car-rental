@@ -17,6 +17,8 @@ class DepositController extends Controller
      */
     public function store(Booking $booking, DepositGateway $gateway, AvailabilityService $availability): JsonResponse
     {
+        // A hold-mode booking saves a card instead (CardController).
+        abort_if($booking->usesHold(), 409, 'This booking takes a card hold, not a deposit payment.');
         abort_unless(
             $booking->status === BookingStatus::PendingDeposit,
             409,

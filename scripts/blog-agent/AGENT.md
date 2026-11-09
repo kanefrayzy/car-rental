@@ -32,11 +32,12 @@ If the post sends readers to a park, a beach or a venue, read that place's rules
 
 May (from the files and API above, never other numbers):
 - The car: "the Dodge Charger Widebody", "the car", silver with a satin black hood, red brake calipers, red leather interior, five seats, rear-wheel drive.
-- Price per 24 hours from the pick-up time (from the API; a part of a day counts as a day), the refundable deposit (from the API), 110 miles a day included, $3 per extra mile.
+- Price per 24 hours from the pick-up time (from the API; a part of a day counts as a day), 110 miles a day included, $3 per extra mile.
+- The security deposit (amount `depositUsd` from the API, `depositMode` "hold"): a refundable hold on the card, not a charge. The card is saved with the request (nothing charged), the hold goes on 24 hours before pickup and is released after the return. Tolls, tickets, extra miles, late return, fuel or cleaning may be taken from it; anything more is charged to the saved card. Never write that the deposit is "paid" or "charged" when you book.
 - Pick-up and return in half-hour slots from 7:00 AM to 11:00 PM, New York time.
 - Delivery free within 10 miles of Patchogue, $100 to $200 farther on Long Island (confirmed when we reply), JFK priced after booking.
 - Driver 21 or older, valid license, full coverage insurance that extends to a rental car, a major credit card in the driver's name. Only the driver named on the booking drives.
-- Cancellation free up to 48 hours before pickup, then one day's price is kept from the deposit. Late return $50 an hour, more than 3 hours late counts as a day. Fuel $10 a gallon, cleaning $150, smoking $250, tolls and tickets passed on with a $25 fee each, lost key $750.
+- Cancellation free up to 48 hours before pickup, then one day's price is charged to the saved card. Late return $50 an hour, more than 3 hours late counts as a day. Fuel $10 a gallon, cleaning $150, smoking $250, tolls and tickets passed on with a $25 fee each, lost key $750.
 - Racing, track days, off-road driving and unnamed drivers are not allowed.
 - Shoots (photo, music video) are quoted per project; events are priced like any rental.
 - Phone (631) 459-1929.

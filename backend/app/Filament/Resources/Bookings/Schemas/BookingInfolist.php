@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Bookings\Schemas;
 
 use App\Enums\BookingStatus;
+use App\Enums\HoldStatus;
 use App\Filament\Resources\Bookings\BookingActions;
 use App\Filament\Resources\Bookings\Tables\BookingsTable;
 use App\Models\Booking;
@@ -101,6 +102,7 @@ class BookingInfolist
                                     ->label('Deposit')
                                     ->money('USD', decimalPlaces: 0)
                                     ->helperText(fn (Booking $record): string => match (true) {
+                                        $record->usesHold() && $record->deposit_paid_at === null => self::holdDetails($record),
                                         $record->deposit_refunded_at !== null => 'Refunded $'.number_format($record->deposit_refunded_usd, 2)
                                             .' on '.$record->deposit_refunded_at->setTimezone(config('rental.timezone'))->format('M j, Y')
                                             .($record->deposit_refund_note ? ': '.$record->deposit_refund_note : ''),
@@ -153,5 +155,31 @@ class BookingInfolist
         }
 
         return 'Scheduled for about '.$due->setTimezone($timezone)->format('M j, g:i A');
+    }
+
+    /** The deposit hold, as the owner reads it: card, state, deadline, what was taken. */
+    private static function holdDetails(Booking $record): string
+    {
+        $timezone = config('rental.timezone');
+        $at = fn ($moment) => $moment?->setTimezone($timezone)->format('M j, g:i A') ?? 'unknown';
+        $card = $record->card_label ?? 'the saved card';
+
+        $state = match ($record->hold_status) {
+            null => $record->status === BookingStatus::Cancelled ? 'No card was saved.' : 'Waiting for the customer to save a card.',
+            HoldStatus::Scheduled => "Hold scheduled on {$card} for {$at($record->holdDueAt())}.",
+            HoldStatus::OnHold => "On hold on {$card} since {$at($record->hold_placed_at)}; Stripe releases it on its own after {$at($record->hold_expires_at)}"
+                .($record->hold_expires_at->lt($record->holdNeededUntil()) ? ' (renewed before then while the rental needs it).' : '.'),
+            HoldStatus::Failed => "Hold failed on {$card} ({$at($record->hold_failed_at)}): {$record->hold_failure} The customer was emailed a link to confirm it."
+                .($record->hasCapturableHold() ? " The previous hold stays until {$at($record->hold_expires_at)}." : ' You decide whether to hand over the car.'),
+            HoldStatus::Released => "Released {$at($record->hold_released_at)}. Nothing taken.",
+            HoldStatus::Captured => 'Captured $'.number_format($record->hold_captured_usd, 2)." on {$at($record->hold_captured_at)} ({$record->hold_capture_reason}); the rest was released.",
+            HoldStatus::Expired => 'Expired: Stripe released it before it was captured.',
+        };
+
+        $charges = $record->charges()->latest()->get()->map(fn ($charge) => ($charge->status === 'succeeded' ? 'Charged' : 'Declined')
+            .' $'.number_format($charge->amount_usd, 2).' for '.$charge->reasonLabel().' on '.$at($charge->created_at)
+            .($charge->failure ? " ({$charge->failure})" : ''));
+
+        return trim($state.($charges->isNotEmpty() ? ' Extra: '.$charges->join('; ').'.' : ''));
     }
 }

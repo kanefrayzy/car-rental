@@ -160,8 +160,8 @@ class AvailabilityTest extends TestCase
 
         $booking = Booking::sole();
         $this->assertSame(['07:30', '23:00', 4], [$booking->pickup_time, $booking->return_time, $booking->days]);
-        $this->assertSame('Tue, Oct 20, 2026 at 7:30 AM', $booking->pickupLabel());
-        $this->assertSame('Fri, Oct 23, 2026 at 11:00 PM', $booking->returnLabel());
+        $this->assertSame('Tue, Oct 20, 2026 at 7:30 AM ET', $booking->pickupLabel());
+        $this->assertSame('Fri, Oct 23, 2026 at 11:00 PM ET', $booking->returnLabel());
 
         // In the customer's email, on their booking page and in the admin panel.
         $html = (new BookingRequestConfirmation($booking->load('car')))->render();

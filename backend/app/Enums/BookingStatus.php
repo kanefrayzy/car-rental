@@ -13,6 +13,12 @@ enum BookingStatus: string implements HasColor, HasLabel
     /** Deposit received; waiting for the owner to confirm. */
     case DepositPaid = 'deposit_paid';
 
+    /**
+     * The card is saved for the deposit hold (deposit_mode "hold"); waiting for the owner to
+     * confirm. Holds the dates like a paid deposit.
+     */
+    case CardSaved = 'card_saved';
+
     case Confirmed = 'confirmed';
 
     /** The car is back. Set by the owner; a few hours later the customer is asked for a review. */
@@ -26,6 +32,7 @@ enum BookingStatus: string implements HasColor, HasLabel
         return match ($this) {
             self::PendingDeposit => 'New request',
             self::DepositPaid => 'Deposit paid',
+            self::CardSaved => 'Card saved',
             self::Confirmed => 'Confirmed',
             self::Returned => 'Returned',
             self::Cancelled => 'Cancelled',
@@ -37,6 +44,7 @@ enum BookingStatus: string implements HasColor, HasLabel
         return match ($this) {
             self::PendingDeposit => 'warning',
             self::DepositPaid => 'info',
+            self::CardSaved => 'info',
             self::Confirmed => 'success',
             // Registered in AdminPanelProvider: the built-in colours are all taken.
             self::Returned => 'violet',
@@ -47,6 +55,6 @@ enum BookingStatus: string implements HasColor, HasLabel
     /** Statuses the owner still has to act on. */
     public static function awaitingOwner(): array
     {
-        return [self::PendingDeposit, self::DepositPaid];
+        return [self::PendingDeposit, self::DepositPaid, self::CardSaved];
     }
 }

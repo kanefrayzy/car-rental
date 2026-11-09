@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\BookingStatus;
 use App\Enums\DocumentType;
+use App\Enums\HoldStatus;
 use App\Http\Controllers\Controller;
 use App\Mail\DocumentsUploaded;
 use App\Models\Booking;
+use App\Services\DepositHolds;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -23,9 +25,14 @@ use Symfony\Component\HttpKernel\Exception\GoneHttpException;
  */
 class BookingUploadController extends Controller
 {
-    public function show(Booking $booking): JsonResponse
+    public function show(Booking $booking, DepositHolds $holds): JsonResponse
     {
-        return response()->json($this->describe($booking));
+        // Just after the customer saved a card or finished a hold, ask Stripe rather than wait
+        // for its webhook. Only then: otherwise the page makes no call to Stripe.
+        $holds->syncCard($booking);
+        $holds->syncPendingHold($booking);
+
+        return response()->json($this->describe($booking->refresh()));
     }
 
     public function store(Request $request, Booking $booking): JsonResponse
@@ -128,8 +135,23 @@ class BookingUploadController extends Controller
             'acceptsUploads' => $booking->acceptsUploads(),
             // The page also takes the deposit while the request is waiting for it.
             'depositUsd' => $booking->deposit_usd,
+            // "hold": the card is saved and a hold placed before pick-up; "charge": paid at once.
+            'depositMode' => $booking->deposit_mode,
             'awaitingDeposit' => $booking->status === BookingStatus::PendingDeposit,
             'depositPaid' => $booking->deposit_paid_at !== null,
+            'cardSaved' => $booking->card_saved_at !== null,
+            // The customer may save a card (also after an early confirmation).
+            'awaitingCard' => $booking->usesHold() && $booking->card_saved_at === null && $booking->deposit_paid_at === null
+                && in_array($booking->status, [BookingStatus::PendingDeposit, BookingStatus::Confirmed], true),
+            'cardLabel' => $booking->card_label,
+            'holdStatus' => $booking->hold_status?->value,
+            'holdAt' => $booking->usesHold() ? $booking->holdDueAt()->toIso8601String() : null,
+            'holdPlacedAt' => $booking->hold_placed_at?->toIso8601String(),
+            'holdReleasedAt' => $booking->hold_released_at?->toIso8601String(),
+            'holdCapturedUsd' => $booking->hold_captured_usd,
+            'holdCaptureReason' => $booking->hold_capture_reason,
+            // A failed hold the customer can finish on the page.
+            'holdActionNeeded' => $booking->hold_status === HoldStatus::Failed && $booking->hold_pending_intent_id !== null && $booking->isOpen(),
             // ...and the rental itself once the owner has confirmed.
             'rentalTotalUsd' => $booking->totalWithTax(),
             'rentalDue' => $booking->rentalDue(),

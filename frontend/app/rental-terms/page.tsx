@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { ContentPage } from "@/components/layout/ContentPage";
 import { site } from "@/config/site";
-import { rentalTerms, usd } from "@/config/terms";
+import { depositDefaults, rentalTerms, usd } from "@/config/terms";
 import { getCars, getSiteSettings } from "@/lib/catalog";
 import { pageMetadata } from "@/lib/seo";
 import { formatTime } from "@/lib/time";
@@ -16,15 +16,21 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 /*
  * A short summary, as competitors do; the full agreement is signed at pickup. The payment
- * sections follow what the site does (user, 2026-10-19): the deposit is charged with the request
- * (Stripe, capture_method automatic), refunded after the return minus charges; the rental is
+ * sections follow what the site does: since 2026-11-10 (owner) the deposit is a hold on the card
+ * saved with the request, placed 24 hours before pickup and released after the return
+ * (backend App\Services\DepositHolds); a late cancellation fee and charges the hold does not
+ * cover go to the saved card. Before that it was charged with the request and refunded (the
+ * "charge" branches below, still used if the API's mode is switched back). The rental is
  * paid from the approval email before pickup. Every number comes from config: site.booking (confirmed by the client) and config/terms.ts (templates,
  * tagged TODO until the client confirms them). The price can come from the API (lib/catalog.ts).
  */
 export default async function RentalTermsPage() {
   const { booking, location } = site;
   const t = rentalTerms;
-  const [[car], { depositUsd }] = await Promise.all([getCars(), getSiteSettings()]);
+  const [[car], { depositUsd, depositMode }] = await Promise.all([getCars(), getSiteSettings()]);
+  const hold = depositMode === "hold";
+  const lateFee =
+    t.cancellation.lateCancellationFeeDays === 1 ? "one rental day" : plural(t.cancellation.lateCancellationFeeDays, "rental day");
 
   return (
     <ContentPage title="Rental Terms" path="/rental-terms" intro="The short version of how renting works.">
@@ -57,16 +63,45 @@ export default async function RentalTermsPage() {
       </ul>
 
       <h2>Security deposit</h2>
-      <ul>
-        <li>
-          {usd(depositUsd)}, paid by card when you request the booking. It is charged, not held on your card. Until it
-          is paid, your dates are held for {plural(booking.holdHours, "hour")}.
-        </li>
-        <li>
-          We refund it after the car is returned, minus any of the charges below. Refunds take 5 to 10 business days to
-          show up, depending on your bank.
-        </li>
-      </ul>
+      {hold ? (
+        <ul>
+          <li>
+            A {usd(depositUsd)} refundable hold on your card. It is a hold, not a charge: nothing is taken unless
+            something is owed under these terms.
+          </li>
+          <li>
+            You save your card when you request the booking. Nothing is charged then. Saving it locks your dates; until
+            then they are reserved for {plural(booking.holdHours, "hour")}.
+          </li>
+          <li>
+            We place the hold {plural(depositDefaults.holdHoursBeforePickup, "hour")} before pickup, or right away if
+            pickup is sooner. Banks keep a hold for a few days only, so on a longer rental we place a new hold before the
+            old one ends and then release the old one.
+          </li>
+          <li>
+            After the car is returned, we release the hold. Your bank decides how fast it shows as available again.
+          </li>
+          <li>
+            If something is owed for tolls, tickets, extra miles, late return, fuel or cleaning, we may use part of the
+            hold for it and release the rest. We email you what was used and why.
+          </li>
+          <li>
+            If your bank declines the hold, we email you a link to confirm it or use another card. Without a hold we may
+            not hand over the car.
+          </li>
+        </ul>
+      ) : (
+        <ul>
+          <li>
+            {usd(depositUsd)}, paid by card when you request the booking. It is charged, not held on your card. Until it
+            is paid, your dates are held for {plural(booking.holdHours, "hour")}.
+          </li>
+          <li>
+            We refund it after the car is returned, minus any of the charges below. Refunds take 5 to 10 business days
+            to show up, depending on your bank.
+          </li>
+        </ul>
+      )}
 
       <h2>Paying for the rental</h2>
       <ul>
@@ -77,19 +112,35 @@ export default async function RentalTermsPage() {
       </ul>
 
       <h2>Cancellation</h2>
-      <ul>
-        <li>
-          Free up to {t.cancellation.freeHoursBefore} hours before pickup: we refund the deposit and any rental payment
-          in full.
-        </li>
-        <li>
-          Later than that, the price of{" "}
-          {t.cancellation.lateCancellationFeeDays === 1 ? "one rental day" : plural(t.cancellation.lateCancellationFeeDays, "rental day")} is kept from
-          your deposit, and we refund the rest.
-        </li>
-      </ul>
+      {hold ? (
+        <ul>
+          <li>
+            Free up to {t.cancellation.freeHoursBefore} hours before pickup: we release any hold and refund any rental
+            payment in full.
+          </li>
+          <li>
+            Later than that, the price of {lateFee} is charged to the card you saved, and any hold on it is released.
+            A rental payment is refunded, minus that fee.
+          </li>
+        </ul>
+      ) : (
+        <ul>
+          <li>
+            Free up to {t.cancellation.freeHoursBefore} hours before pickup: we refund the deposit and any rental
+            payment in full.
+          </li>
+          <li>Later than that, the price of {lateFee} is kept from your deposit, and we refund the rest.</li>
+        </ul>
+      )}
 
-      <h2>Charges taken from the deposit</h2>
+      <h2>{hold ? "Charges after the rental" : "Charges taken from the deposit"}</h2>
+      {hold && (
+        <p>
+          Tolls, tickets, extra miles, late return, fuel and cleaning may be taken from the hold. Anything the hold does
+          not cover, including charges that arrive after it is released, is charged to the card you saved. We email you
+          each charge and its reason.
+        </p>
+      )}
       <ul>
         <li>
           Extra miles: {usd(booking.extraMileUsd)} per mile over {booking.includedMilesPerDay} miles per day.

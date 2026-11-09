@@ -1,6 +1,6 @@
 import { cacheLife } from "next/cache";
 import { cars as configCars, type Car } from "@/config/cars";
-import { site } from "@/config/site";
+import { depositDefaults, type DepositMode } from "@/config/terms";
 
 /**
  * The fleet as the site shows it: everything from config/cars.ts, with the daily price from
@@ -50,17 +50,18 @@ async function fetchPrices(): Promise<Map<string, number>> {
 }
 
 /**
- * What the owner sets on the admin panel's Settings page: the deposit for new requests. Same
- * caching as the prices; config/site.ts is the fallback. (The API also returns an Instagram
- * link from there; the site ignores it since 2026-10-23: social links live in site.social.)
+ * What the owner sets on the admin panel’s Settings page: the deposit for new requests (and the
+ * API’s deposit mode, hold or charge). Same caching as the prices; depositDefaults in
+ * config/terms.ts is the fallback. (The API also returns an Instagram link from there; the
+ * site ignores it since 2026-10-23: social links live in site.social.)
  */
-export type SiteSettings = { depositUsd: number };
+export type SiteSettings = { depositUsd: number; depositMode: DepositMode };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
   "use cache";
   cacheLife("minutes");
 
-  const fallback: SiteSettings = { depositUsd: site.booking.depositUsd };
+  const fallback: SiteSettings = { depositUsd: depositDefaults.amountUsd, depositMode: depositDefaults.mode };
   if (!SERVER_API_URL) return fallback;
 
   try {
@@ -72,6 +73,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
     const data = (await response.json()) as Partial<SiteSettings>;
     return {
       depositUsd: Number.isInteger(data.depositUsd) && data.depositUsd! > 0 ? data.depositUsd! : fallback.depositUsd,
+      depositMode: data.depositMode === "charge" || data.depositMode === "hold" ? data.depositMode : fallback.depositMode,
     };
   } catch (error) {
     console.warn(`Settings from the API are unavailable, using the config: ${String(error)}`);

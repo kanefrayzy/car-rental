@@ -22,12 +22,12 @@ class SettingsTest extends TestCase
         Mail::fake();
         Filament::setCurrentPanel('admin');
         $this->actingAs(User::factory()->create());
-        config(['rental.deposit_usd' => 1000]);
+        config(['rental.deposit.amount_usd' => 1000]);
     }
 
     public function test_the_api_gives_the_defaults_until_the_owner_saves_something(): void
     {
-        $this->getJson('/api/settings')->assertExactJson(['depositUsd' => 1000, 'instagramUrl' => null]);
+        $this->getJson('/api/settings')->assertExactJson(['depositUsd' => 1000, 'depositMode' => 'hold', 'instagramUrl' => null]);
     }
 
     public function test_the_owner_sets_the_deposit_and_instagram_and_new_requests_use_them(): void
@@ -44,7 +44,7 @@ class SettingsTest extends TestCase
             ->assertHasNoFormErrors();
 
         $this->getJson('/api/settings')
-            ->assertExactJson(['depositUsd' => 1, 'instagramUrl' => 'https://www.instagram.com/buenoexotics']);
+            ->assertExactJson(['depositUsd' => 1, 'depositMode' => 'hold', 'instagramUrl' => 'https://www.instagram.com/buenoexotics']);
 
         $this->postJson('/api/bookings', $this->bookingPayload(['pickupDate' => '2026-11-10', 'returnDate' => '2026-11-12']))
             ->assertCreated()

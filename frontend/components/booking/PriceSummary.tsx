@@ -1,4 +1,4 @@
-import { usd } from "@/config/terms";
+import { depositCopy, usd, type DepositMode } from "@/config/terms";
 
 export type PriceQuote = {
   days: number;
@@ -8,14 +8,17 @@ export type PriceQuote = {
   taxUsd: number;
   totalUsd: number;
   depositUsd: number;
+  /** "hold" (the default since 2026-11-10): a refundable hold on the card, nothing charged. */
+  depositMode?: DepositMode;
 };
 
 /**
  * The price as the customer pays it: rental and tax add up to the total, the deposit sits
- * apart because it comes back. Used by the booking form and the booking page.
+ * apart because it is a hold (or, for older bookings, comes back). Used by the booking form and
+ * the booking page.
  */
 export function PriceSummary({ quote, className = "" }: { quote: PriceQuote; className?: string }) {
-  const { days, pricePerDay, rentalUsd, taxRate, taxUsd, totalUsd, depositUsd } = quote;
+  const { days, pricePerDay, rentalUsd, taxRate, taxUsd, totalUsd, depositUsd, depositMode = "hold" } = quote;
 
   return (
     <div className={className}>
@@ -32,15 +35,23 @@ export function PriceSummary({ quote, className = "" }: { quote: PriceQuote; cla
           {usd(totalUsd)}
         </dd>
       </dl>
-      <div className="mt-4 flex items-start justify-between gap-4 rounded-btn-lg bg-tint/60 px-3.5 py-3 text-sm">
-        <p>
-          <span className="font-medium text-ink">Refundable deposit</span>
-          <span className="mt-0.5 block text-[0.8125rem] leading-snug text-muted">
-            Paid separately, returned after the car is checked in.
-          </span>
+      {depositMode === "hold" ? (
+        <p className="mt-4 rounded-btn-lg bg-tint/60 px-3.5 py-3 text-[0.8125rem] leading-snug text-ink-soft">
+          {/* "Security deposit: $500 refundable hold on your card. Nothing is charged. ..." */}
+          <span className="font-semibold text-ink">{depositCopy(depositUsd).summary.split(": ")[0]}:</span>{" "}
+          {depositCopy(depositUsd).summary.split(": ").slice(1).join(": ")}
         </p>
-        <p className="font-semibold text-ink">{usd(depositUsd)}</p>
-      </div>
+      ) : (
+        <div className="mt-4 flex items-start justify-between gap-4 rounded-btn-lg bg-tint/60 px-3.5 py-3 text-sm">
+          <p>
+            <span className="font-medium text-ink">Refundable deposit</span>
+            <span className="mt-0.5 block text-[0.8125rem] leading-snug text-muted">
+              Paid separately, returned after the car is checked in.
+            </span>
+          </p>
+          <p className="font-semibold text-ink">{usd(depositUsd)}</p>
+        </div>
+      )}
     </div>
   );
 }

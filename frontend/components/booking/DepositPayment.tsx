@@ -1,14 +1,15 @@
 "use client";
 
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { loadStripe, type PaymentIntentResult, type Stripe } from "@stripe/stripe-js";
+import { loadStripe, type PaymentIntentResult, type SetupIntentResult, type Stripe } from "@stripe/stripe-js";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { CheckIcon } from "@/components/ui/icons";
 import { site } from "@/config/site";
-import { usd } from "@/config/terms";
+import { depositCopy, usd } from "@/config/terms";
 import { trackOnce } from "@/lib/analytics";
-import { ApiError, createDepositIntent, createRentalPaymentIntent } from "@/lib/api";
+import { ApiError, createDepositIntent, createRentalPaymentIntent, resumeDepositHold, startCardSetup } from "@/lib/api";
 import { useResetOnLeave } from "@/lib/useResetOnLeave";
 
 // Publishable key, compiled in at build time. Without it (or without Stripe on the API) the
@@ -19,32 +20,59 @@ const STRIPE_KEY = process.env.NEXT_PUBLIC_STRIPE_KEY ?? "";
 let stripePromise: Promise<Stripe | null> | null = null;
 const getStripe = () => (stripePromise ??= loadStripe(STRIPE_KEY));
 
+/**
+ * "deposit": the old deposit, charged with the request. "rental": price plus tax once the owner
+ * has confirmed. "card": the card saved for the deposit hold (since 2026-11-10), nothing
+ * charged. "hold": the customer finishes a hold their bank did not approve without them.
+ */
+export type PaymentKind = "deposit" | "rental" | "card" | "hold";
+
 type DepositPaymentProps = {
   bookingId: string;
   amountUsd: number;
-  /** "deposit" with the request; "rental" (price plus tax) once the owner has confirmed. */
-  kind?: "deposit" | "rental";
+  kind?: PaymentKind;
   onPaid?: () => void;
 };
 
+// The site's tokens: brand-deep, ink, danger, and the button radius.
+const appearance = {
+  theme: "stripe" as const,
+  variables: {
+    colorPrimary: "#0566fb",
+    colorText: "#0a1730",
+    colorDanger: "#c8102e",
+    fontFamily: "DM Sans, system-ui, sans-serif",
+    borderRadius: "10px",
+  },
+};
+
+/** Analytics' name for the step: the deposit as a hold or a charge, or the rental. */
+const paymentParams = (kind: PaymentKind) =>
+  kind === "rental" ? { payment: "rental" } : { payment: "deposit", deposit_type: kind === "deposit" ? "charge" : "hold" };
+
 /**
- * The refundable deposit, paid by card (or Apple Pay / Google Pay) without leaving the page.
- * The API creates the payment; Stripe's webhook, not this form, marks the booking as paid.
+ * Card payments without leaving the page (card, Apple Pay / Google Pay). The API creates the
+ * payment or the card setup; Stripe (its webhook, or the API asking it) records the outcome,
+ * never this form.
  */
 export function DepositPayment({ bookingId, amountUsd, kind = "deposit", onPaid }: DepositPaymentProps) {
-  const [clientSecret, setClientSecret] = useState<string | null | undefined>(STRIPE_KEY ? undefined : null);
+  // The card is saved through a deferred SetupIntent: the form shows first, and the API creates
+  // the setup only once the customer has ticked the hold agreement and pressed the button.
+  const deferred = kind === "card";
+  const [clientSecret, setClientSecret] = useState<string | null | undefined>(STRIPE_KEY ? (deferred ? "" : undefined) : null);
   const [problem, setProblem] = useState("");
   const [paid, setPaid] = useState(false);
 
   // booking_payment_view: the payment step is on screen, once per booking and kind in a session.
   useEffect(() => {
-    trackOnce(`payment-view:${kind}:${bookingId}`, "booking_payment_view", { payment: kind, value: amountUsd, currency: "USD" });
+    trackOnce(`payment-view:${kind}:${bookingId}`, "booking_payment_view", { ...paymentParams(kind), value: amountUsd, currency: "USD" });
   }, [bookingId, kind, amountUsd]);
 
   useEffect(() => {
-    if (!STRIPE_KEY) return;
+    if (!STRIPE_KEY || deferred) return;
     let current = true;
-    (kind === "rental" ? createRentalPaymentIntent : createDepositIntent)(bookingId)
+    const start = kind === "rental" ? createRentalPaymentIntent : kind === "hold" ? resumeDepositHold : createDepositIntent;
+    start(bookingId)
       .then((intent) => current && setClientSecret(intent.clientSecret))
       .catch((error) => {
         if (!current) return;
@@ -53,7 +81,7 @@ export function DepositPayment({ bookingId, amountUsd, kind = "deposit", onPaid 
     return () => {
       current = false;
     };
-  }, [bookingId, kind]);
+  }, [bookingId, kind, deferred]);
 
   if (paid) {
     return (
@@ -61,7 +89,11 @@ export function DepositPayment({ bookingId, amountUsd, kind = "deposit", onPaid 
         <CheckIcon className="mt-0.5 shrink-0 text-base" />
         {kind === "rental"
           ? `Payment of ${usd(amountUsd)} received. Thank you, see you at pickup.`
-          : `Deposit of ${usd(amountUsd)} received. Your dates are held while we review your request.`}
+          : kind === "card"
+            ? "Card saved. Nothing was charged. Your dates are held while we review your request."
+            : kind === "hold"
+              ? `Thank you. The ${usd(amountUsd)} hold is on your card. Nothing is charged.`
+              : `Deposit of ${usd(amountUsd)} received. Your dates are held while we review your request.`}
       </p>
     );
   }
@@ -75,7 +107,9 @@ export function DepositPayment({ bookingId, amountUsd, kind = "deposit", onPaid 
   if (clientSecret === null) {
     return (
       <p className="text-sm leading-relaxed text-muted">
-        Card payment isn’t switched on yet. We’ll contact you about paying {usd(amountUsd)}.
+        {kind === "card" || kind === "hold"
+          ? `Card payment isn’t switched on yet. We’ll contact you about the ${usd(amountUsd)} deposit hold.`
+          : `Card payment isn’t switched on yet. We’ll contact you about paying ${usd(amountUsd)}.`}
       </p>
     );
   }
@@ -83,54 +117,57 @@ export function DepositPayment({ bookingId, amountUsd, kind = "deposit", onPaid 
     return <p className="text-sm text-muted">Loading the secure payment form…</p>;
   }
 
+  const done = () => {
+    setPaid(true);
+    trackPayment(bookingId, kind, amountUsd);
+    onPaid?.();
+  };
+
   return (
     <Elements
       stripe={getStripe()}
-      options={{
-        clientSecret,
-        // The site is in English; without this Stripe follows the browser language.
-        locale: "en",
-        appearance: {
-          theme: "stripe",
-          // The site's tokens: brand-deep, ink, danger, and the button radius.
-          variables: {
-            colorPrimary: "#0566fb",
-            colorText: "#0a1730",
-            colorDanger: "#c8102e",
-            fontFamily: "DM Sans, system-ui, sans-serif",
-            borderRadius: "10px",
-          },
-        },
-      }}
+      options={
+        deferred
+          ? // No intent yet: Stripe needs to know it is a card saved for later, without the customer.
+            { mode: "setup", currency: "usd", setupFutureUsage: "off_session", locale: "en", appearance }
+          : { clientSecret: clientSecret as string, locale: "en", appearance }
+      }
     >
-      <PayForm
-        kind={kind}
-        label={kind === "rental" ? `Pay ${usd(amountUsd)}` : `Pay ${usd(amountUsd)} deposit`}
-        onPaid={() => {
-          setPaid(true);
-          trackPayment(bookingId, kind, amountUsd);
-          onPaid?.();
-        }}
-      />
+      {deferred ? (
+        <SaveCardForm bookingId={bookingId} amountUsd={amountUsd} onSaved={done} />
+      ) : (
+        <PayForm
+          kind={kind}
+          label={kind === "rental" ? `Pay ${usd(amountUsd)}` : kind === "hold" ? `Confirm the ${usd(amountUsd)} hold` : `Pay ${usd(amountUsd)} deposit`}
+          note={kind === "hold" ? "Nothing is charged. You can use another card." : undefined}
+          onPaid={done}
+        />
+      )}
     </Elements>
   );
 }
 
-/** Counts a payment in analytics: deposit_paid or rental_paid, once per booking. */
-export function trackPayment(bookingId: string, kind: "deposit" | "rental", amountUsd?: number) {
-  trackOnce(`${kind}:${bookingId}`, kind === "rental" ? "rental_paid" : "deposit_paid", {
+/**
+ * Counts a payment in analytics, once per booking: rental_paid, or deposit_paid. A saved card
+ * (or a finished hold) is the deposit step of the hold model, so it counts as deposit_paid with
+ * deposit_type "hold": the funnel and the Ads conversion keep their meaning.
+ */
+export function trackPayment(bookingId: string, kind: PaymentKind, amountUsd?: number) {
+  const deposit = kind !== "rental";
+  trackOnce(`${deposit ? "deposit" : "rental"}:${bookingId}`, deposit ? "deposit_paid" : "rental_paid", {
+    ...(deposit ? { deposit_type: kind === "deposit" ? "charge" : "hold" } : {}),
     value: amountUsd,
     currency: "USD",
   });
 }
 
-const returnUrl = (kind: "deposit" | "rental") => {
+const returnUrl = (kind: PaymentKind) => {
   const url = new URL(window.location.href);
   url.searchParams.set("paid", kind);
   return url.toString();
 };
 
-function PayForm({ label, kind, onPaid }: { label: string; kind: "deposit" | "rental"; onPaid: () => void }) {
+function PayForm({ label, kind, note, onPaid }: { label: string; kind: PaymentKind; note?: string; onPaid: () => void }) {
   const stripe = useStripe();
   const elements = useElements();
   const [busy, setBusy] = useState(false);
@@ -185,9 +222,121 @@ function PayForm({ label, kind, onPaid }: { label: string; kind: "deposit" | "re
         </p>
       )}
       <Button onClick={pay} loading={busy} disabled={!stripe} className="mt-4 max-sm:w-full">
-        {busy ? "Paying…" : label}
+        {busy ? "Confirming…" : label}
       </Button>
-      <p className="mt-3 text-[0.8125rem] text-muted">Secured by Stripe. We never see your card number.</p>
+      <p className="mt-3 text-[0.8125rem] text-muted">
+        {note ? `${note} ` : ""}Secured by Stripe. We never see your card number.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The card for the deposit hold: the agreement checkbox, the card, and "Save card". Nothing is
+ * charged; the API creates the SetupIntent only after the box is ticked, and records the time.
+ */
+function SaveCardForm({ bookingId, amountUsd, onSaved }: { bookingId: string; amountUsd: number; onSaved: () => void }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [agreed, setAgreed] = useState(false);
+  const [agreeError, setAgreeError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const saving = useRef(false);
+  const checkbox = useRef<HTMLInputElement>(null);
+  useResetOnLeave(() => {
+    saving.current = false;
+    setBusy(false);
+  });
+  const copy = depositCopy(amountUsd);
+  // The agreement links its "Rental Terms".
+  const [termsBefore, termsAfter] = copy.checkbox.split("Rental Terms");
+
+  const save = async () => {
+    if (!stripe || !elements || saving.current) return;
+    // The button is never disabled for a missing tick: a click says what is missing.
+    if (!agreed) {
+      setAgreeError(`Tick the box to agree to the ${usd(amountUsd)} hold.`);
+      checkbox.current?.focus();
+      return;
+    }
+    saving.current = true;
+    setBusy(true);
+    setError("");
+
+    let result: SetupIntentResult | undefined;
+    try {
+      // Card details first, so a typo shows before anything is created.
+      const { error: invalid } = await elements.submit();
+      if (invalid) {
+        setError(invalid.message ?? "Check your card details.");
+        return;
+      }
+      const { clientSecret } = await startCardSetup(bookingId, true);
+      if (!clientSecret) {
+        setError(`Card payment isn’t switched on yet. We’ll contact you about the deposit. Questions? Call ${site.phone.display}.`);
+        return;
+      }
+      result = await stripe.confirmSetup({
+        elements,
+        clientSecret,
+        redirect: "if_required",
+        confirmParams: { return_url: returnUrl("card") },
+      });
+    } catch (failure) {
+      setError(failure instanceof ApiError ? failure.message : `We couldn’t save your card. Try again or call ${site.phone.display}.`);
+      return;
+    } finally {
+      saving.current = false;
+      setBusy(false);
+    }
+
+    if (result?.error) {
+      setError(result.error.message ?? "Your card wasn’t accepted. Try another card.");
+      return;
+    }
+    if (result && ["succeeded", "processing"].includes(result.setupIntent.status)) onSaved();
+  };
+
+  return (
+    <div>
+      <p className="mb-4 rounded-btn-lg bg-tint/60 px-3.5 py-3 text-sm leading-relaxed text-ink">{copy.summary}</p>
+      <PaymentElement options={{ layout: "tabs" }} />
+      <label className="mt-4 flex items-start gap-3 text-sm leading-relaxed text-ink-soft">
+        <input
+          ref={checkbox}
+          type="checkbox"
+          checked={agreed}
+          onChange={(event) => {
+            setAgreed(event.target.checked);
+            if (event.target.checked) setAgreeError("");
+          }}
+          aria-invalid={agreeError ? true : undefined}
+          aria-describedby={agreeError ? "hold-agree-error" : undefined}
+          className="mt-0.5 size-5 shrink-0 accent-brand-deep"
+        />
+        <span>
+          {termsBefore}
+          <Link href="/rental-terms" target="_blank" className="font-medium text-brand-deep underline">
+            Rental Terms
+          </Link>
+          {termsAfter}
+        </span>
+      </label>
+      {agreeError && (
+        <p id="hold-agree-error" role="alert" className="mt-2 text-sm font-medium text-danger">
+          {agreeError}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm font-medium text-danger">
+          {error}
+        </p>
+      )}
+      <Button onClick={save} loading={busy} disabled={!stripe} className="mt-4 max-sm:w-full">
+        {busy ? "Saving…" : "Save card"}
+      </Button>
+      <p className="mt-3 text-[0.8125rem] text-muted">Nothing is charged now. Secured by Stripe. We never see your card number.</p>
     </div>
   );
 }

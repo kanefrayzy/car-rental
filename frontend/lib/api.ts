@@ -9,7 +9,7 @@
 import { cars } from "@/config/cars";
 import type { ContactTopic, Occasion } from "@/config/content";
 import { site } from "@/config/site";
-import { rentalTerms } from "@/config/terms";
+import { depositDefaults, rentalTerms, type DepositMode } from "@/config/terms";
 import { billedDays, type TimeSlot } from "./time";
 import type { IsoDate } from "./validation";
 
@@ -70,11 +70,18 @@ export type BookingResult = {
   bookingId: string;
   status: "pending_deposit";
   depositUsd: number;
+  depositMode?: DepositMode;
   link: BookingLink;
 };
 
-/** "returned": the owner marked the car back (admin panel, 2026-10-19). */
-export type BookingStatus = "pending_deposit" | "deposit_paid" | "confirmed" | "returned" | "cancelled";
+/**
+ * "returned": the owner marked the car back (admin panel, 2026-10-19). "card_saved": the card is
+ * saved for the deposit hold (2026-11-10), which locks the dates like "deposit_paid" did.
+ */
+export type BookingStatus = "pending_deposit" | "deposit_paid" | "card_saved" | "confirmed" | "returned" | "cancelled";
+
+/** The deposit hold's state (deposit mode "hold"); null until the card is saved. */
+export type HoldStatus = "scheduled" | "on_hold" | "failed" | "released" | "captured" | "expired";
 
 /** Everything the booking page shows. */
 export type BookingDetails = {
@@ -105,9 +112,26 @@ export type BookingDetails = {
   acceptsUploads: boolean;
   documents: { license: boolean; insurance: boolean };
   depositUsd: number;
+  /** "hold": the card is saved and held before pick-up (since 2026-11-10); "charge": paid at once. */
+  depositMode: DepositMode;
   /** The request is still waiting for its deposit: the page offers the card form. */
   awaitingDeposit: boolean;
   depositPaid: boolean;
+  /** Hold mode: the card is saved; the page no longer asks for it. */
+  cardSaved: boolean;
+  /** Hold mode: the page asks the customer to save their card. */
+  awaitingCard: boolean;
+  /** "Visa •••• 4242". */
+  cardLabel: string | null;
+  holdStatus: HoldStatus | null;
+  /** When the hold is placed: some hours before pick-up (ISO). */
+  holdAt: string | null;
+  holdPlacedAt: string | null;
+  holdReleasedAt: string | null;
+  holdCapturedUsd: number | null;
+  holdCaptureReason: string | null;
+  /** The bank did not approve the hold off session; the customer can finish it on the page. */
+  holdActionNeeded: boolean;
   /** The rental itself (price plus tax), asked for once the owner confirms. */
   rentalTotalUsd: number;
   rentalDue: boolean;
@@ -119,7 +143,7 @@ export type DocumentUpload = { license?: File; insurance?: File };
 export type DepositIntent = {
   bookingId: string;
   amountUsd: number;
-  /** Stripe PaymentIntent client secret. Null while payments are switched off. */
+  /** Stripe PaymentIntent (or SetupIntent, for a card) client secret. Null while payments are off. */
   clientSecret: string | null;
 };
 
@@ -328,9 +352,20 @@ function mockBookingDetails(link: BookingLink): BookingDetails {
     taxUsd,
     acceptsUploads: true,
     documents: saved?.documents ?? { license: false, insurance: false },
-    depositUsd: site.booking.depositUsd,
+    depositUsd: depositDefaults.amountUsd,
+    depositMode: depositDefaults.mode,
     awaitingDeposit: true,
     depositPaid: false,
+    cardSaved: false,
+    awaitingCard: depositDefaults.mode === "hold",
+    cardLabel: null,
+    holdStatus: null,
+    holdAt: new Date(new Date(`${pickupDate}T${pickupTime}:00-05:00`).getTime() - depositDefaults.holdHoursBeforePickup * 3_600_000).toISOString(),
+    holdPlacedAt: null,
+    holdReleasedAt: null,
+    holdCapturedUsd: null,
+    holdCaptureReason: null,
+    holdActionNeeded: false,
     rentalTotalUsd: Math.round((rentalUsd + taxUsd) * 100) / 100,
     rentalDue: false,
     rentalPaid: false,
@@ -381,7 +416,8 @@ export async function submitBookingRequest(data: BookingRequest): Promise<Bookin
     return {
       bookingId,
       status: "pending_deposit",
-      depositUsd: site.booking.depositUsd,
+      depositUsd: depositDefaults.amountUsd,
+      depositMode: depositDefaults.mode,
       link: { bookingId, expires: "0", signature: "mock" },
     };
   }
@@ -446,9 +482,29 @@ export async function createRentalPaymentIntent(bookingId: string): Promise<Depo
 export async function createDepositIntent(bookingId: string): Promise<DepositIntent> {
   if (!usesRealApi) {
     await delay();
-    return { bookingId, amountUsd: site.booking.depositUsd, clientSecret: null };
+    return { bookingId, amountUsd: depositDefaults.amountUsd, clientSecret: null };
   }
   return postJson(`/bookings/${encodeURIComponent(bookingId)}/deposit`, undefined, { timeoutMs: 15_000 });
+}
+
+// POST /api/bookings/{id}/card: save the card for the deposit hold, with the customer's
+// agreement (the checkbox). Answers a Stripe SetupIntent client secret.
+export async function startCardSetup(bookingId: string, acceptHold: boolean): Promise<DepositIntent> {
+  if (!usesRealApi) {
+    await delay();
+    return { bookingId, amountUsd: depositDefaults.amountUsd, clientSecret: null };
+  }
+  return postJson(`/bookings/${encodeURIComponent(bookingId)}/card`, { acceptHold }, { timeoutMs: 15_000 });
+}
+
+// POST /api/bookings/{id}/hold: finish a hold the bank did not approve without the customer
+// (confirm it, or use another card). Answers the hold's PaymentIntent client secret.
+export async function resumeDepositHold(bookingId: string): Promise<DepositIntent> {
+  if (!usesRealApi) {
+    await delay();
+    return { bookingId, amountUsd: depositDefaults.amountUsd, clientSecret: null };
+  }
+  return postJson(`/bookings/${encodeURIComponent(bookingId)}/hold`, undefined, { timeoutMs: 15_000 });
 }
 
 export type ContactRequest = {

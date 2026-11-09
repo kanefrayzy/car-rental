@@ -90,7 +90,12 @@ services:
       MAIL_FROM_NAME: ${APP_NAME:-Bueno Exotics}
       RENTAL_OWNER_EMAIL: ${RENTAL_OWNER_EMAIL:-}
       RENTAL_CONTACT_EMAIL: ${RENTAL_CONTACT_EMAIL:-info@buenoexoticsny.com}
-      RENTAL_DEPOSIT_USD: ${RENTAL_DEPOSIT_USD:-1000}
+      # The deposit (config/rental.php): the default amount for the admin Settings page, and
+      # "hold" (a card authorisation) or "charge". STRIPE_EXTENDED_AUTHORIZATION only once
+      # Stripe has enabled extended authorization on the account.
+      DEPOSIT_AMOUNT: ${DEPOSIT_AMOUNT:-500}
+      DEPOSIT_MODE: ${DEPOSIT_MODE:-hold}
+      STRIPE_EXTENDED_AUTHORIZATION: ${STRIPE_EXTENDED_AUTHORIZATION:-false}
       RENTAL_DOCUMENT_RETENTION_DAYS: ${RENTAL_DOCUMENT_RETENTION_DAYS:-180}
       # Google's "Ask for reviews" link for the thank-you email. Empty: no review requests.
       GOOGLE_REVIEW_URL: ${GOOGLE_REVIEW_URL:-}

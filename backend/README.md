@@ -26,7 +26,7 @@ Then point the site at it: put `NEXT_PUBLIC_API_URL=http://localhost:8000/api` i
 
 Queued jobs (the review request below) need a worker: `php artisan queue:work`. Without one they wait in the `jobs` table. In Docker the `queue` container runs it.
 
-Tests: `composer test` (183 tests; they use an in-memory database and fake storage, mail and Stripe).
+Tests: `composer test` (221 tests; they use an in-memory database and fake storage, mail and Stripe).
 
 ## Endpoints
 
@@ -121,11 +121,23 @@ STRIPE_SECRET=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-and point a Stripe webhook at `https://<api-host>/api/stripe/webhook` for the events `payment_intent.succeeded` and `payment_intent.amount_capturable_updated`.
+and point a Stripe webhook at `https://<api-host>/api/stripe/webhook` for the events `payment_intent.succeeded`, `charge.refunded`, `setup_intent.succeeded`, `payment_intent.amount_capturable_updated`, `payment_intent.canceled` and `payment_intent.payment_failed`. A restricted key needs write access to Customers, SetupIntents, PaymentMethods, PaymentIntents and Refunds.
 
-A deposit is marked paid only by that webhook, never by the browser. `STRIPE_CAPTURE_METHOD=manual` places a hold instead of charging; Stripe releases an uncaptured hold after about a week, so it only suits short lead times.
+Payments are recorded only from Stripe (the webhook, or the API reading Stripe), never from the browser.
 
-The site's deposit step does not show Stripe's payment form yet. The API side is ready and tested against a fake gateway and signed test events; it has not been run against a real Stripe account.
+### The deposit as a hold (since 2026-11-10)
+
+`DEPOSIT_MODE=hold` (the default; `charge` is the old way) and `DEPOSIT_AMOUNT=500` (the default for the admin Settings page, where the owner sets it). A booking keeps the mode and amount it was made with, so bookings from before keep their charged deposit and its refunds. The rules live in `App\Services\DepositHolds`; Stripe calls in `App\Services\Deposits\StripeHoldGateway`.
+
+1. **Request.** The booking page (`/booking`) shows Stripe's card form with the agreement "I authorize a $500 hold on my card 24 hours before pickup...". `POST /bookings/{id}/card` (`acceptHold` required) creates the Stripe customer and a SetupIntent (`usage=off_session`, 3D Secure on session); the time of the agreement is stored (`hold_authorized_at`). Nothing is charged. Stripe's `setup_intent.succeeded` (or the booking page reading Stripe on its next load) saves the card: status `card_saved`, which holds the dates like a paid deposit did.
+2. **Hold.** `bookings:deposit-holds` (scheduler, every 5 minutes) authorises the deposit off session with `capture_method=manual`, `rental.deposit.hold_hours_before_pickup` (24) before pick-up; at once when the card is saved less than that before pick-up.
+3. **How long it lasts.** Stripe's `capture_before` on the charge, stored as `hold_expires_at`. Stripe's docs (read 2026-11-10, docs.stripe.com/payments/place-a-hold-on-a-payment-method): 7 days for online card payments, but Visa only 5 days ("4 days and 18 hours") when the merchant starts the payment, which our off-session holds are. Test mode returned 7 days for a Visa. While the hold ends before the owner's check time after the return (`inspection_hours_after_return`, 24), it is renewed `renew_hours_before_expiry` (12) before the deadline: a new authorisation first, then the old one is cancelled (the customer may briefly see both).
+4. **Extended authorization** (up to 30 days for car rentals, docs.stripe.com/payments/extended-authorization) needs IC+ pricing or Stripe's approval; on this account Stripe refused it ("not eligible", test mode, 2026-11-10). `STRIPE_EXTENDED_AUTHORIZATION=true` requests it (`if_available`) once Stripe enables it; if Stripe still refuses, the hold is placed without it and the error logged. Whether it applies to off-session payments is not documented: check `extended_authorization` on a charge after turning it on.
+5. **Hold failed** (declined, insufficient funds, 3D Secure wanted): `hold_status=failed`, the customer gets `DepositHoldFailed` with the booking page link (`POST /bookings/{id}/hold` gives the page the failed PaymentIntent's client secret, with `setup_future_usage=off_session`, so another card is saved too), the owner gets `DepositHoldFailedOwner`. The booking itself is untouched: the owner decides. "Try hold again" in the panel retries the saved card. A failed renewal leaves the current hold until it lapses.
+6. **After the return** (admin panel): Release hold (email `DepositHoldReleased`), Capture up to the hold with reasons from `rental.charge_reasons` that have `capture` (tolls, tickets, extra miles, late return, fuel, cleaning; the rest is released at once; same email, captured wording), Extra charge to the saved card for any reason in the list (the Rental Terms' charges; `booking_charges` table; email `ExtraCharge`). The owner is reminded (`DepositHoldReminder`) once, 24 hours after the return, or at the return if the hold would lapse sooner.
+7. **Cancelling** releases the hold; a late cancellation fee (one day's price within 48 hours of pick-up, offered in the dialog) is charged to the saved card first, and a decline stops the cancellation.
+
+Tests: `DepositHoldTest` (fake Stripe, scheduler run with a moved clock) and `StripeHoldIntegrationTest` (Stripe test mode with test cards; `STRIPE_TEST_SECRET=sk_test_... php artisan test --group=stripe`). The card form and 3D Secure in a browser: `node scripts/check-deposit-hold.mjs` (local only). Test cards: 4242 4242 4242 4242 works; 4000 0000 0000 0002 and 4000 0000 0000 9995 are refused when saved (the page says so); 4000 0025 0000 3155 needs 3D Secure when saved, then holds work; 4000 0027 6000 3184 needs it every time, so the off-session hold fails and the customer confirms it on the page; 4000 0000 0000 0341 saves and then fails at the hold.
 
 ## Layout
 

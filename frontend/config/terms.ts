@@ -48,6 +48,31 @@ export const rentalTerms = {
   ],
 } as const;
 
+export type DepositMode = "hold" | "charge";
+
+/**
+ * The security deposit (owner, 2026-11-10): a refundable hold on the customer's card instead of
+ * a charge. The card is saved with the request (nothing charged), the hold is placed
+ * `holdHoursBeforePickup` before pick-up and released after the return. The amount here is the
+ * default: the owner sets it on the admin panel's Settings page (lib/catalog.ts). The API has
+ * the same defaults (rental.deposit in /backend/config/rental.php): change both together.
+ */
+export const depositDefaults = {
+  amountUsd: 500,
+  mode: "hold" as DepositMode,
+  holdHoursBeforePickup: 24,
+};
+
+/** The deposit's wording, wherever the site shows it. No em dashes (owner's brief). */
+export const depositCopy = (amountUsd: number) => ({
+  /** The booking summary and the card step. */
+  summary: `Security deposit: ${usd(amountUsd)} refundable hold on your card. Nothing is charged. It’s released after the car is returned.`,
+  /** The agreement the customer ticks before the card is saved. */
+  checkbox: `I authorize a ${usd(amountUsd)} hold on my card ${depositDefaults.holdHoursBeforePickup} hours before pickup. It may be used for tolls, tickets, extra miles, late return, fuel or cleaning as described in the Rental Terms, and is released after return.`,
+  /** Beside the price. */
+  highlight: `Only a ${usd(amountUsd)} refundable hold`,
+});
+
 /** Rental plus tax, rounded to the cent like the API does. Delivery and deposit are separate. */
 export function priceWithTax(rentalUsd: number) {
   const taxUsd = Math.round(rentalUsd * rentalTerms.taxRatePercent) / 100;

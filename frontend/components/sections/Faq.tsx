@@ -21,7 +21,8 @@ export async function Faq({
   title?: string;
   id?: string;
 }) {
-  const all = faqFor((await getSiteSettings()).depositUsd);
+  const { depositUsd, depositMode } = await getSiteSettings();
+  const all = faqFor(depositUsd, depositMode);
   const items = [...extra, ...(questions ? all.filter((item) => questions.includes(item.question)) : all)];
 
   return (

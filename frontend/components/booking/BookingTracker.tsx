@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/Button";
 import { CalendarIcon, CheckIcon, PhoneIcon } from "@/components/ui/icons";
 import { cars } from "@/config/cars";
 import { site } from "@/config/site";
-import { usd } from "@/config/terms";
+import { depositDefaults, usd } from "@/config/terms";
 import { ApiError, getBooking, type BookingDetails, type BookingLink } from "@/lib/api";
 import { forgetBooking, saveBooking } from "@/lib/savedBooking";
 import { occasionLabel } from "@/config/content";
 import { formatTime } from "@/lib/time";
 import { formatDate } from "@/lib/validation";
-import { DepositPayment, trackPayment } from "./DepositPayment";
+import { DepositPayment, trackPayment, type PaymentKind } from "./DepositPayment";
 import { DocumentsForm } from "./DocumentsForm";
 import { PriceSummary } from "./PriceSummary";
 
@@ -27,14 +27,16 @@ function linkProblem(error: unknown): string {
   return error instanceof ApiError ? error.message : `Something went wrong loading your booking. ${callUs}`;
 }
 
+// New York time with its zone, wherever the visitor is (owner, 2026-11-10): "Wed, Nov 11, 2:01 AM ET".
 const formatMoment = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", {
+  `${new Date(iso).toLocaleString("en-US", {
+    timeZone: site.booking.timeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+  })} ET`;
 
 type StepState = "done" | "current" | "upcoming";
 
@@ -49,10 +51,10 @@ export function BookingTracker() {
   const [justSent, setJustSent] = useState(false);
   const [details, setDetails] = useState<BookingDetails | null>(null);
   const [problem, setProblem] = useState("");
-  const [paid, setPaid] = useState({ deposit: false, rental: false });
+  const [paid, setPaid] = useState({ deposit: false, rental: false, card: false, hold: false });
   const [showDocuments, setShowDocuments] = useState(false);
   // Back from a payment that Stripe sent elsewhere first (a bank check): which one went through.
-  const [returnedPayment, setReturnedPayment] = useState<"deposit" | "rental" | null>(null);
+  const [returnedPayment, setReturnedPayment] = useState<PaymentKind | null>(null);
 
   // The link's values are in the address, which only the browser knows (the page is static).
   useEffect(() => {
@@ -73,9 +75,10 @@ export function BookingTracker() {
       window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
     }
     const paidKind = params.get("paid");
-    if (paidKind === "deposit" || paidKind === "rental") {
+    if (paidKind === "deposit" || paidKind === "rental" || paidKind === "card" || paidKind === "hold") {
       if (["succeeded", "processing"].includes(params.get("redirect_status") ?? "")) setReturnedPayment(paidKind);
-      for (const key of ["paid", "redirect_status", "payment_intent", "payment_intent_client_secret"]) params.delete(key);
+      for (const key of ["paid", "redirect_status", "payment_intent", "payment_intent_client_secret", "setup_intent", "setup_intent_client_secret"])
+        params.delete(key);
       window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
     }
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -106,7 +109,7 @@ export function BookingTracker() {
     trackPayment(link.bookingId, returnedPayment, returnedPayment === "rental" ? details.rentalTotalUsd : details.depositUsd);
   }, [details, link, returnedPayment]);
 
-  const paidNow = (kind: "deposit" | "rental") => {
+  const paidNow = (kind: PaymentKind) => {
     setPaid((current) => ({ ...current, [kind]: true }));
     // Stripe's webhook updates the booking within a few seconds.
     if (link) [3000, 8000].forEach((ms) => setTimeout(() => load(link), ms));
@@ -127,8 +130,15 @@ export function BookingTracker() {
 
   const car = cars.find((item) => item.slug === details.carSlug) ?? cars[0];
   const cancelled = details.status === "cancelled";
-  const depositDone = details.depositPaid || paid.deposit || details.status === "deposit_paid";
-  const depositOpen = details.awaitingDeposit && !depositDone;
+  // The deposit: a hold on a saved card (since 2026-11-10), or the old charge.
+  const hold = details.depositMode === "hold";
+  const cardDone = details.cardSaved || paid.card;
+  const cardOpen = hold && details.awaitingCard && !cardDone;
+  const holdAction = hold && details.holdActionNeeded && !paid.hold && !cancelled;
+  const depositDone = hold
+    ? cardDone || details.depositPaid || !details.awaitingCard
+    : details.depositPaid || paid.deposit || details.status === "deposit_paid";
+  const depositOpen = hold ? cardOpen : details.awaitingDeposit && !depositDone;
   const docsDone = details.documents.license && details.documents.insurance;
   const returned = details.status === "returned";
   const confirmed = details.status === "confirmed" || returned;
@@ -137,7 +147,7 @@ export function BookingTracker() {
 
   // The first unfinished step is the one the customer is on.
   const order = [
-    { key: "deposit", done: depositDone || !details.awaitingDeposit },
+    { key: "deposit", done: hold ? depositDone && !holdAction : depositDone || !details.awaitingDeposit },
     { key: "documents", done: docsDone },
     { key: "confirm", done: confirmed },
     { key: "rental", done: rentalDone },
@@ -148,6 +158,8 @@ export function BookingTracker() {
 
   const status = cancelled
     ? { label: "Cancelled", tone: "muted" as const }
+    : holdAction
+      ? { label: "Action needed: confirm the hold", tone: "warning" as const }
     : returned
       ? { label: "Returned", tone: rentalOpen ? ("brand" as const) : ("success" as const) }
       : rentalDone
@@ -155,13 +167,15 @@ export function BookingTracker() {
       : confirmed
         ? { label: "Confirmed · payment due", tone: "brand" as const }
         : depositOpen
-          ? { label: "Waiting for your deposit", tone: "warning" as const }
+          ? { label: hold ? "Waiting for your card" : "Waiting for your deposit", tone: "warning" as const }
           : !docsDone
             ? { label: "Waiting for your documents", tone: "warning" as const }
             : { label: "In review", tone: "brand" as const };
 
   const nextAction = cancelled
     ? "This booking was cancelled."
+    : holdAction
+      ? `Next: confirm the ${usd(details.depositUsd)} hold on your card. Nothing is charged.`
     : returned
       ? rentalOpen
         ? `Next: pay ${usd(details.rentalTotalUsd)} for the rental.`
@@ -171,9 +185,11 @@ export function BookingTracker() {
       : rentalOpen
         ? `Next: pay ${usd(details.rentalTotalUsd)} for the rental, any time before pickup.`
         : depositOpen
-          ? `Next: pay the ${usd(details.depositUsd)} refundable deposit to lock your dates.`
+          ? hold
+            ? `Next: save your card for the ${usd(details.depositUsd)} refundable hold. Nothing is charged.`
+            : `Next: pay the ${usd(details.depositUsd)} refundable deposit to lock your dates.`
           : !docsDone && details.acceptsUploads
-            ? "Next: upload your driver’s license and proof of insurance."
+            ? "Next: upload your driver’s license and proof of insurance, now or any time before pickup."
             : "Nothing to do right now. We’re reviewing your request and will email you.";
 
   const quote = {
@@ -184,6 +200,7 @@ export function BookingTracker() {
     taxUsd: details.taxUsd,
     totalUsd: details.rentalTotalUsd,
     depositUsd: details.depositUsd,
+    depositMode: details.depositMode,
   };
 
   // The customer's own page: name, email, dates, amounts and the signed links stay out of
@@ -219,7 +236,9 @@ export function BookingTracker() {
           <section className="rounded-card border border-line bg-card p-6 shadow-card sm:p-8">
             <h2 className="text-lg font-bold">This booking was cancelled</h2>
             <p className="mt-2 text-[0.9375rem] leading-relaxed text-ink-soft">
-              Anything you paid by card goes back to the same card; banks usually show it within 5 to 10 business days.
+              {hold
+                ? "Any hold on your card has been released. We emailed you the details."
+                : "Anything you paid by card goes back to the same card; banks usually show it within 5 to 10 business days."}
               Want to pick new dates?
             </p>
             <Link href={`/book/${car.slug}`} className="mt-4 inline-block font-medium text-brand-deep hover:underline">
@@ -234,32 +253,52 @@ export function BookingTracker() {
               meta={details.requestedAt ? formatMoment(details.requestedAt) : undefined}
             />
 
-            <Step
-              state={state("deposit", depositDone || !details.awaitingDeposit)}
-              title={`Refundable deposit · ${usd(details.depositUsd)}`}
-              meta={
-                depositDone
-                  ? "Paid. It comes back after the car is checked in."
-                  : !details.awaitingDeposit
-                    ? "Due before pickup. We’ll arrange it with you."
-                    : details.holdExpired
-                      ? "The hold on your dates has ended. Pay now to lock them if they’re still free."
-                      : details.holdEndsAt
-                        ? `Your dates are held until ${formatMoment(details.holdEndsAt)}. The deposit locks them.`
-                        : undefined
-              }
-              warn={depositOpen && details.holdExpired}
-            >
-              {depositOpen && (
-                <div className="mt-4 rounded-btn-lg border border-line-strong p-4 sm:p-5">
-                  <DepositPayment
-                    bookingId={details.bookingId}
-                    amountUsd={details.depositUsd}
-                    onPaid={() => paidNow("deposit")}
-                  />
-                </div>
-              )}
-            </Step>
+            {hold ? (
+              <Step
+                state={state("deposit", depositDone && !holdAction)}
+                title={`Security deposit · ${usd(details.depositUsd)} refundable hold`}
+                meta={holdMeta(details, { cardDone, cardOpen, holdAction, paidHold: paid.hold })}
+                warn={holdAction || (cardOpen && details.holdExpired)}
+              >
+                {(cardOpen || holdAction) && (
+                  <div className="mt-4 rounded-btn-lg border border-line-strong p-4 sm:p-5">
+                    <DepositPayment
+                      bookingId={details.bookingId}
+                      amountUsd={details.depositUsd}
+                      kind={holdAction ? "hold" : "card"}
+                      onPaid={() => paidNow(holdAction ? "hold" : "card")}
+                    />
+                  </div>
+                )}
+              </Step>
+            ) : (
+              <Step
+                state={state("deposit", depositDone || !details.awaitingDeposit)}
+                title={`Refundable deposit · ${usd(details.depositUsd)}`}
+                meta={
+                  depositDone
+                    ? "Paid. It comes back after the car is checked in."
+                    : !details.awaitingDeposit
+                      ? "Due before pickup. We’ll arrange it with you."
+                      : details.holdExpired
+                        ? "The hold on your dates has ended. Pay now to lock them if they’re still free."
+                        : details.holdEndsAt
+                          ? `Your dates are held until ${formatMoment(details.holdEndsAt)}. The deposit locks them.`
+                          : undefined
+                }
+                warn={depositOpen && details.holdExpired}
+              >
+                {depositOpen && (
+                  <div className="mt-4 rounded-btn-lg border border-line-strong p-4 sm:p-5">
+                    <DepositPayment
+                      bookingId={details.bookingId}
+                      amountUsd={details.depositUsd}
+                      onPaid={() => paidNow("deposit")}
+                    />
+                  </div>
+                )}
+              </Step>
+            )}
 
             <Step
               state={state("documents", docsDone)}
@@ -269,7 +308,7 @@ export function BookingTracker() {
                   ? "Both received. Thank you."
                   : !details.acceptsUploads
                     ? `This booking no longer takes documents. Questions? Call ${site.phone.display}.`
-                    : "A photo of your license and your full coverage insurance card."
+                    : "A photo of your license and your full coverage insurance card. Upload them now or any time before pickup."
               }
             >
               {details.acceptsUploads &&
@@ -326,8 +365,8 @@ export function BookingTracker() {
 
             <Step
               state={state("pickup", returned)}
-              title={`Pickup · ${formatDate(details.pickupDate)}, ${formatTime(details.pickupTime)}`}
-              meta={`Return by ${formatDate(details.returnDate)}, ${formatTime(details.returnTime)}. We call or text to arrange pickup in ${site.location.city} or delivery. Bring your driver’s license and the credit card in your name.`}
+              title={`Pickup · ${formatDate(details.pickupDate)}, ${formatTime(details.pickupTime)} ET`}
+              meta={`Return by ${formatDate(details.returnDate)}, ${formatTime(details.returnTime)} ET. We call or text to arrange pickup in ${site.location.city} or delivery. Bring your driver’s license and the credit card in your name.`}
               last
             />
           </ol>
@@ -351,13 +390,13 @@ export function BookingTracker() {
                 <CalendarIcon className="shrink-0 text-lg text-brand-deep" />
                 <p className="text-ink">
                   <span className="block font-medium">
-                    {formatDate(details.pickupDate)}, {formatTime(details.pickupTime)}
+                    {formatDate(details.pickupDate)}, {formatTime(details.pickupTime)} ET
                   </span>
                   <span className="block font-medium">
-                    to {formatDate(details.returnDate)}, {formatTime(details.returnTime)}
+                    to {formatDate(details.returnDate)}, {formatTime(details.returnTime)} ET
                   </span>
                   <span className="text-muted">
-                    {details.days} {details.days === 1 ? "day" : "days"} · New York time
+                    {details.days} {details.days === 1 ? "day" : "days"} · ET is New York time
                   </span>
                   {details.occasion && (
                     <span className="block text-muted">Occasion: {occasionLabel(details.occasion)}</span>
@@ -467,4 +506,30 @@ function TrackerSkeleton() {
       </div>
     </div>
   );
+}
+
+/** What the deposit step says in hold mode, from the request to the release. */
+function holdMeta(
+  details: BookingDetails,
+  { cardDone, cardOpen, holdAction, paidHold }: { cardDone: boolean; cardOpen: boolean; holdAction: boolean; paidHold: boolean },
+): string | undefined {
+  const amount = usd(details.depositUsd);
+  const card = details.cardLabel ? ` (${details.cardLabel})` : "";
+  const before = `${depositDefaults.holdHoursBeforePickup} hours before pickup`;
+  if (holdAction) return `Your bank didn’t approve the ${amount} hold. Confirm it below, with the same card or another one. Nothing is charged.`;
+  if (paidHold || details.holdStatus === "on_hold")
+    return `${amount} is on hold on your card${card}. Nothing is charged. It’s released after the car is returned.`;
+  if (details.holdStatus === "released" || details.holdStatus === "expired")
+    return `Released${details.holdReleasedAt ? ` on ${formatMoment(details.holdReleasedAt)}` : ""}. Nothing was charged from the hold.`;
+  if (details.holdStatus === "captured")
+    return `${usd(details.holdCapturedUsd ?? 0)} was used${details.holdCaptureReason ? ` for ${details.holdCaptureReason}` : ""}. The rest was released.`;
+  if (cardDone)
+    return `Card saved${card}. We place the ${amount} hold on it ${details.holdAt ? `on ${formatMoment(details.holdAt)}, ` : ""}${before}. Nothing is charged.`;
+  if (cardOpen)
+    return details.holdExpired
+      ? "Your dates are no longer reserved. Save your card now to lock them if they’re still free."
+      : details.holdEndsAt
+        ? `Your dates are reserved until ${formatMoment(details.holdEndsAt)}. Saving your card locks them. Nothing is charged. Your license and insurance can come later, any time before pickup.`
+        : "Saving your card locks your dates. Nothing is charged. Your license and insurance can come later, any time before pickup.";
+  return "Arranged with us.";
 }

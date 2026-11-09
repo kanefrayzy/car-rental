@@ -25,6 +25,7 @@ class BookingManager
     public function __construct(
         private AvailabilityService $availability,
         private DepositGateway $deposits,
+        private DepositHolds $holds,
     ) {}
 
     /** Accept a request. Refused if another booking or closed dates overlap it. */
@@ -62,14 +63,28 @@ class BookingManager
      * Turn a request down, or cancel a confirmed booking. Frees the dates. A card deposit is
      * refunded in full unless `$depositRefundUsd` says less: a late cancellation keeps its fee
      * from the deposit and refunds the rest (Rental Terms, 2026-10-19); 0 keeps all of it.
+     *
+     * A deposit hold (deposit_mode "hold") is released instead, and a late cancellation fee,
+     * `$lateFeeUsd`, is charged to the saved card first (Rental Terms, 2026-11-10). If the card
+     * refuses it, nothing is cancelled, so the owner can decide again. `$byCustomer`: the customer
+     * asked for it, which the email says instead of "we can't go ahead".
      */
-    public function cancel(Booking $booking, ?string $messageToCustomer = null, bool $notifyCustomer = true, bool $refundDeposit = true, bool $refundRental = true, ?float $depositRefundUsd = null): Booking
+    public function cancel(Booking $booking, ?string $messageToCustomer = null, bool $notifyCustomer = true, bool $refundDeposit = true, bool $refundRental = true, ?float $depositRefundUsd = null, float $lateFeeUsd = 0, bool $byCustomer = false): Booking
     {
         if ($booking->status === BookingStatus::Cancelled) {
             throw new BookingActionRefused('This booking is already cancelled.');
         }
         if ($booking->status === BookingStatus::Returned) {
             throw new BookingActionRefused('The car is already back, so this booking cannot be cancelled. Use Refund deposit to give the deposit back.');
+        }
+
+        if ($booking->usesHold()) {
+            if ($lateFeeUsd > 0) {
+                $this->holds->extraCharge($booking, $lateFeeUsd, 'late_cancellation', notifyCustomer: false);
+            }
+            if ($booking->hold_status?->isOpen()) {
+                $this->holds->release($booking, notifyCustomer: false);
+            }
         }
 
         // Refund first: if Stripe refuses, the booking stays as it was and the owner can retry.
@@ -88,7 +103,7 @@ class BookingManager
 
         if ($notifyCustomer) {
             $message = trim((string) $messageToCustomer) ?: null;
-            rescue(fn () => Mail::to($booking->email)->send(new BookingCancelled($booking->fresh('car'), $message)));
+            rescue(fn () => Mail::to($booking->email)->send(new BookingCancelled($booking->fresh('car'), $message, $byCustomer)));
         }
 
         return $booking;
@@ -209,6 +224,9 @@ class BookingManager
         }
         if ($booking->deposit_paid_at !== null) {
             throw new BookingActionRefused('The deposit is already marked as paid.');
+        }
+        if ($booking->hold_status?->isOpen()) {
+            throw new BookingActionRefused('The customer saved a card for the deposit hold. Release the hold first if you take the deposit another way.');
         }
 
         $this->closeCardPayment($booking->stripe_payment_intent_id, 'deposit');

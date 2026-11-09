@@ -41,7 +41,10 @@ class Settings extends Page
             ->statePath('data')
             ->components([
                 Section::make('Deposit')
-                    ->description('Charged by card when a customer sends a request, refundable. Requests already sent keep the deposit they were made with. The website shows the new amount within a minute or two.')
+                    ->description(fn (): string => (config('rental.deposit.mode') === 'hold'
+                        ? 'A hold on the customer’s card: the card is saved with the request, the amount is held '.config('rental.deposit.hold_hours_before_pickup').' hours before pick-up and released after the return. Nothing is charged unless you capture it.'
+                        : 'Charged by card when a customer sends a request, refundable.')
+                        .' Requests already sent keep the deposit they were made with. The website shows the new amount within a minute or two.')
                     ->schema([
                         TextInput::make('deposit_usd')
                             ->label('Deposit')

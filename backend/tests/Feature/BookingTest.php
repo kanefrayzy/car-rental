@@ -22,7 +22,7 @@ class BookingTest extends TestCase
 
         Storage::fake('local');
         Mail::fake();
-        config(['rental.owner_email' => 'owner@example.com', 'rental.deposit_usd' => 500]);
+        config(['rental.owner_email' => 'owner@example.com', 'rental.deposit.amount_usd' => 500]);
     }
 
     public function test_a_valid_request_is_saved_with_tax_and_the_terms_agreement(): void
@@ -37,6 +37,7 @@ class BookingTest extends TestCase
             'bookingId' => $booking->public_id,
             'status' => 'pending_deposit',
             'depositUsd' => 500,
+            'depositMode' => 'hold',
             'link' => $booking->pageLink(),
         ]);
 

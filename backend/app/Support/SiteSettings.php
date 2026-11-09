@@ -15,7 +15,7 @@ class SiteSettings
     {
         $value = Setting::find('deposit_usd')?->value;
 
-        return $value !== null ? (int) $value : (int) config('rental.deposit_usd');
+        return $value !== null ? (int) $value : (int) config('rental.deposit.amount_usd');
     }
 
     /** The business's Instagram page, or null to hide it on the site. */

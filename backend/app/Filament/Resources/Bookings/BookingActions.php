@@ -3,17 +3,23 @@
 namespace App\Filament\Resources\Bookings;
 
 use App\Enums\BookingStatus;
+use App\Enums\HoldStatus;
 use App\Exceptions\BookingActionRefused;
 use App\Jobs\SendReviewRequest;
 use App\Mail\DocumentsRequest;
 use App\Models\Booking;
 use App\Services\BookingManager;
+use App\Services\DepositHolds;
 use Closure;
 use Filament\Actions\Action;
+use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\Radio;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -54,6 +60,18 @@ class BookingActions
             ->modalSubmitActionLabel(fn (Booking $record): string => $record->status === BookingStatus::Confirmed ? 'Cancel booking' : 'Decline request')
             ->modalCancelActionLabel('Keep it')
             ->schema([
+                // The email reads differently (owner, 2026-11-10), and only a customer's own late
+                // cancellation carries the fee.
+                Radio::make('cancelledBy')
+                    ->label('Who is cancelling?')
+                    ->options([
+                        'us' => 'We are (the customer gets "We can’t go ahead with your booking")',
+                        'customer' => 'The customer asked (they get "Your booking is cancelled")',
+                    ])
+                    ->default('us')
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(fn (?string $state, Set $set, Booking $record) => $set('lateFee', $state === 'customer' ? self::lateFeeFor($record) : 0)),
                 TextInput::make('refundAmount')
                     ->label('Amount to refund')
                     ->prefix('$')
@@ -65,6 +83,19 @@ class BookingActions
                     ->helperText(fn (Booking $record): string => 'Back to their card through Stripe. The full $'.number_format($record->deposit_usd)
                         .' deposit by default; lower it to keep a late cancellation fee, or 0 to keep all of it.')
                     ->visible(fn (Booking $record): bool => $record->depositRefundable()),
+                TextInput::make('lateFee')
+                    ->label('Late cancellation fee')
+                    ->prefix('$')
+                    ->numeric()
+                    ->required()
+                    ->minValue(0)
+                    ->maxValue(fn (): int => config('rental.deposit.max_extra_charge_usd'))
+                    // Offered when the customer cancels: see lateFeeFor().
+                    ->default(0)
+                    ->helperText(fn (Booking $record): string => 'Charged to the saved card ('.($record->card_label ?? 'card').') before cancelling. '
+                        .'Free up to '.config('rental.free_cancellation_hours').' hours before pick-up; later, one day ($'.number_format($record->price_per_day).'). '
+                        .'0 charges nothing. Any hold on the card is released.')
+                    ->visible(fn (Booking $record): bool => $record->usesHold() && $record->hasSavedCard()),
                 Toggle::make('refundRental')
                     ->label(fn (Booking $record): string => 'Refund the rental payment ($'.number_format($record->totalWithTax(), 2).')')
                     ->helperText('Turn it off to keep it under the cancellation terms; refund part of it in the Stripe dashboard if needed.')
@@ -89,6 +120,8 @@ class BookingActions
                     refundDeposit: isset($data['refundAmount']),
                     refundRental: (bool) ($data['refundRental'] ?? false),
                     depositRefundUsd: isset($data['refundAmount']) ? (float) $data['refundAmount'] : null,
+                    lateFeeUsd: (float) ($data['lateFee'] ?? 0),
+                    byCustomer: ($data['cancelledBy'] ?? 'us') === 'customer',
                 ),
                 $record->status === BookingStatus::Confirmed ? 'Booking cancelled' : 'Request declined',
             ));
@@ -144,6 +177,139 @@ class BookingActions
             ->action(fn (Booking $record, array $data) => self::run(
                 fn (BookingManager $manager) => $manager->refundDeposit($record, (float) $data['amount'], $data['note'] ?? null),
                 'Deposit refunded',
+            ));
+    }
+
+    /**
+     * Authorise the deposit on the saved card now: before the scheduled time, or again after a
+     * failed hold (the customer may have topped up the card or called their bank).
+     */
+    public static function placeHoldNow(): Action
+    {
+        return Action::make('placeHoldNow')
+            ->label(fn (Booking $record): string => $record->hold_status === HoldStatus::Failed ? 'Try hold again' : 'Place hold now')
+            ->icon(Heroicon::OutlinedLockClosed)
+            ->color('gray')
+            ->visible(fn (Booking $record): bool => $record->usesHold() && $record->hasSavedCard() && $record->isOpen()
+                && in_array($record->hold_status, [HoldStatus::Scheduled, HoldStatus::Failed], true))
+            ->requiresConfirmation()
+            ->modalIcon(Heroicon::OutlinedLockClosed)
+            ->modalHeading(fn (Booking $record): string => 'Place the $'.number_format($record->deposit_usd).' hold now?')
+            ->modalDescription(fn (Booking $record): string => self::summary($record).' The amount is authorised on '.($record->card_label ?? 'the saved card')
+                .'. Nothing is charged. It is otherwise placed automatically on '.$record->holdDueAt()->format('M j \a\t g:i A').'.')
+            ->modalSubmitActionLabel('Place hold')
+            ->action(function (Booking $record): void {
+                try {
+                    $result = app(DepositHolds::class)->placeHold($record, notifyOnFailure: false);
+                } catch (BookingActionRefused $refused) {
+                    Notification::make()->title('Not done')->body($refused->getMessage())->danger()->persistent()->send();
+
+                    return;
+                }
+
+                $result->status === 'held'
+                    ? Notification::make()->title('Hold placed')->body('$'.number_format($record->deposit_usd).' is on hold on '.($record->card_label ?? 'the card').'.')->success()->send()
+                    : Notification::make()->title('Hold failed')->body($result->reason().' The customer was not emailed; tell them, or wait for them to confirm it.')->danger()->persistent()->send();
+            });
+    }
+
+    /** Gives the hold back: nothing is taken. The customer gets an email. */
+    public static function releaseHold(): Action
+    {
+        return Action::make('releaseHold')
+            ->label('Release hold')
+            ->icon(Heroicon::OutlinedLockOpen)
+            ->color('gray')
+            ->visible(fn (Booking $record): bool => $record->usesHold() && (bool) $record->hold_status?->isOpen() && $record->status !== BookingStatus::Cancelled)
+            ->requiresConfirmation()
+            ->modalIcon(Heroicon::OutlinedLockOpen)
+            ->modalHeading(fn (Booking $record): string => $record->hold_payment_intent_id ? 'Release the $'.number_format($record->deposit_usd).' hold?' : 'Cancel the scheduled hold?')
+            ->modalDescription(fn (Booking $record): string => self::summary($record).($record->hold_payment_intent_id
+                ? ' Nothing is taken and the customer gets an email. Charges that come in later can still go to the saved card with Extra charge.'
+                : ' No hold is placed on the card for this booking.'))
+            ->modalSubmitActionLabel('Release')
+            ->action(fn (Booking $record) => self::run(
+                fn (DepositHolds $holds) => $holds->release($record),
+                'Hold released',
+            ));
+    }
+
+    /** Takes part of the hold for an agreed reason; the rest goes back at once. */
+    public static function captureHold(): Action
+    {
+        $reasons = collect(config('rental.charge_reasons'))
+            ->filter(fn (array $reason) => $reason['capture'])
+            ->map(fn (array $reason) => $reason['label'])
+            ->all();
+
+        return Action::make('captureHold')
+            ->label('Capture')
+            ->icon(Heroicon::OutlinedBanknotes)
+            ->color('gray')
+            ->visible(fn (Booking $record): bool => $record->usesHold() && $record->hasCapturableHold())
+            ->modalHeading('Capture from the hold?')
+            ->modalDescription(fn (Booking $record): string => self::summary($record).' The amount is charged to '.($record->card_label ?? 'the card')
+                .'; the rest of the $'.number_format($record->deposit_usd).' hold is released at once. This can be done once. The customer gets an email with the reason.')
+            ->modalSubmitActionLabel('Capture')
+            ->schema([
+                TextInput::make('amount')
+                    ->label('Amount')
+                    ->prefix('$')
+                    ->numeric()
+                    ->required()
+                    ->minValue(0.01)
+                    ->maxValue(fn (Booking $record): int => $record->deposit_usd)
+                    ->helperText('Up to the hold. For more, capture this and add an Extra charge.'),
+                CheckboxList::make('reasons')
+                    ->label('Reason')
+                    ->options($reasons)
+                    ->columns(2)
+                    ->required(),
+                Textarea::make('note')
+                    ->label('Details for the customer (optional)')
+                    ->placeholder('For example: 2 hours late, 40 extra miles.')
+                    ->rows(2)
+                    ->maxLength(300),
+            ])
+            ->action(fn (Booking $record, array $data) => self::run(
+                fn (DepositHolds $holds) => $holds->capture($record, (float) $data['amount'], $data['reasons'], $data['note'] ?? null),
+                'Captured',
+            ));
+    }
+
+    /** Charges the saved card on top of the hold, for a charge listed in the Rental Terms. */
+    public static function extraCharge(): Action
+    {
+        return Action::make('extraCharge')
+            ->label('Extra charge')
+            ->icon(Heroicon::OutlinedCreditCard)
+            ->color('gray')
+            ->visible(fn (Booking $record): bool => $record->usesHold() && $record->hasSavedCard() && $record->status !== BookingStatus::PendingDeposit)
+            ->modalHeading('Charge the saved card?')
+            ->modalDescription(fn (Booking $record): string => self::summary($record).' Charged now to '.($record->card_label ?? 'the saved card')
+                .', without the customer. Only for charges in the Rental Terms. The customer gets an email with the reason and a receipt from Stripe.')
+            ->modalSubmitActionLabel('Charge card')
+            ->schema([
+                Select::make('reason')
+                    ->label('Reason')
+                    ->options(collect(config('rental.charge_reasons'))->map(fn (array $reason) => $reason['label'])->all())
+                    ->required(),
+                TextInput::make('amount')
+                    ->label('Amount')
+                    ->prefix('$')
+                    ->numeric()
+                    ->required()
+                    ->minValue(0.01)
+                    ->maxValue(fn (): int => config('rental.deposit.max_extra_charge_usd')),
+                Textarea::make('note')
+                    ->label('Details for the customer (optional)')
+                    ->placeholder('For example: toll on the Verrazzano Bridge, Nov 14, $19.00 plus the $25 processing fee.')
+                    ->rows(2)
+                    ->maxLength(300),
+            ])
+            ->action(fn (Booking $record, array $data) => self::run(
+                fn (DepositHolds $holds) => $holds->extraCharge($record, (float) $data['amount'], $data['reason'], $data['note'] ?? null),
+                'Card charged',
             ));
     }
 
@@ -266,6 +432,16 @@ class BookingActions
 
                 Notification::make()->title('Notes saved')->success()->send();
             });
+    }
+
+    /** The Rental Terms: free up to 48 hours before pick-up, then one day's price. */
+    private static function lateFeeFor(Booking $record): int
+    {
+        $pickup = $record->pickupAt();
+
+        return $pickup->isFuture() && $pickup->diffInHours(now(), absolute: true) < config('rental.free_cancellation_hours')
+            ? $record->price_per_day
+            : 0;
     }
 
     private static function summary(Booking $record): string

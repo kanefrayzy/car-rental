@@ -71,8 +71,8 @@ export const site = {
   },
 
   booking: {
-    // Confirmed by the client on 2026-10-14. The API charges the deposit from its own
-    // setting (RENTAL_DEPOSIT_USD in /backend): change both together.
+    // Confirmed by the client on 2026-10-14. The deposit lives in config/terms.ts
+    // (depositDefaults) and on the admin panel's Settings page.
     minDriverAge: 21,
     minRentalDays: 1,
     maxRentalDays: 30, // RENTAL_MAX_DAYS in /backend
@@ -81,7 +81,6 @@ export const site = {
     // same hours (rental.hours in /backend): change both together.
     timeZone: "America/New_York",
     hours: { open: "07:00", close: "23:00", slotMinutes: 30, defaultTime: "10:00" },
-    depositUsd: 1000, // the default; the owner changes it on the admin panel's Settings page
     // How long an unpaid request keeps its dates (RENTAL_HOLD_HOURS in /backend).
     holdHours: 24,
     includedMilesPerDay: 110,

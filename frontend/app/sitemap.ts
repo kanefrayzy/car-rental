@@ -13,13 +13,13 @@ import { absoluteUrl } from "@/lib/seo";
  * service and area pages keep theirs in config/services.ts and config/locations.ts.
  */
 const updated = {
-  home: "2026-11-03",
+  home: "2026-11-10",
   services: "2026-10-19",
   locations: "2026-10-19",
-  contact: "2026-10-19",
-  book: "2026-10-19",
-  rentalTerms: "2026-10-20",
-  privacy: "2026-10-18",
+  contact: "2026-11-10",
+  book: "2026-11-10",
+  rentalTerms: "2026-11-10",
+  privacy: "2026-11-10",
 };
 
 /** Live posts for the sitemap; without them (the API is down) the rest is still listed. */

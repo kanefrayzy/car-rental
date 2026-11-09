@@ -8,7 +8,7 @@ import { ArrowRightIcon, CalendarIcon, CheckIcon, ChevronDownIcon, PhoneIcon, Sp
 import type { Car } from "@/config/cars";
 import { bookingJourneyFor, isOccasion, occasionLabel, occasions, type Occasion } from "@/config/content";
 import { site } from "@/config/site";
-import { priceWithTax, rentalTerms, usd } from "@/config/terms";
+import { priceWithTax, rentalTerms, usd, depositDefaults, type DepositMode } from "@/config/terms";
 import { track } from "@/lib/analytics";
 import { ApiError, bookingPagePath, checkAvailability, isAborted, submitBookingRequest } from "@/lib/api";
 import { saveBooking } from "@/lib/savedBooking";
@@ -27,6 +27,7 @@ import {
   type TripErrors,
 } from "@/lib/validation";
 import { DateField } from "./DateField";
+import { DepositBadge } from "@/components/ui/DepositBadge";
 import { PriceSummary, type PriceQuote } from "./PriceSummary";
 import { TimeField } from "./TimeField";
 
@@ -50,7 +51,8 @@ const { defaultTime } = site.booking.hours;
 const EMPTY_TRIP: Trip = { pickupDate: "", pickupTime: defaultTime, returnDate: "", returnTime: defaultTime };
 
 /** "Oct 25, 2026, 10:00 AM" */
-const formatMoment = (date: string, time: TimeSlot) => `${formatDate(date)}, ${formatTime(time)}`;
+// New York time, named (owner, 2026-11-10).
+const formatMoment = (date: string, time: TimeSlot) => `${formatDate(date)}, ${formatTime(time)} ET`;
 
 function readDraft(): Partial<Draft> {
   try {
@@ -76,7 +78,15 @@ function writeDraft(draft: Draft | null) {
  * deposit and the documents come next. Times are New York time; days are charged per
  * started 24 hours from the pick-up time.
  */
-export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number }) {
+export function BookingForm({
+  car,
+  depositUsd,
+  depositMode = depositDefaults.mode,
+}: {
+  car: Car;
+  depositUsd: number;
+  depositMode?: DepositMode;
+}) {
   const router = useRouter();
   const now = useBusinessNow();
   const today = now?.date ?? "";
@@ -268,6 +278,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
         taxUsd,
         totalUsd,
         depositUsd,
+        depositMode,
       }
     : null;
 
@@ -299,7 +310,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
       const result = await submitBookingRequest({ carSlug: car.slug, ...trip, ...contact, occasion, acceptTerms });
       writeDraft(null);
       saveBooking(result.link);
-      track("booking_submit", { value: totalUsd, currency: "USD", occasion: occasion || undefined });
+      track("booking_submit", { value: totalUsd, currency: "USD", occasion: occasion || undefined, deposit_type: depositMode });
       router.push(bookingPagePath(result.link, { new: "1" }));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -467,9 +478,10 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
           <div className="flex gap-3 rounded-btn-lg border border-line-strong px-4 py-3.5 text-sm leading-relaxed">
             <CheckIcon className="mt-0.5 shrink-0 text-base text-success" />
             <p>
-              <span className="font-medium text-ink">Nothing is charged now.</span> Next you pay the{" "}
-              {usd(depositUsd)} refundable deposit to lock your dates, and upload your license and
-              insurance.
+              <span className="font-medium text-ink">Nothing is charged now.</span>{" "}
+              {depositMode === "hold"
+                ? `Next you save your card for the ${usd(depositUsd)} refundable hold to lock your dates. You can upload your license and insurance now or any time before pickup.`
+                : `Next you pay the ${usd(depositUsd)} refundable deposit to lock your dates, and upload your license and insurance.`}
             </p>
           </div>
 
@@ -542,6 +554,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
                 <span className="font-display text-lg font-bold text-ink">{usd(car.pricePerDay)}</span>/day
               </p>
             </div>
+            {depositMode === "hold" && <DepositBadge amountUsd={depositUsd} className="mt-2" />}
 
             <div className="mt-4 flex items-center gap-3 rounded-btn-lg bg-surface px-3.5 py-3 text-sm">
               <CalendarIcon className="shrink-0 text-lg text-brand-deep" />
@@ -582,7 +595,7 @@ export function BookingForm({ car, depositUsd }: { car: Car; depositUsd: number 
         <div className="rounded-card border border-line bg-card p-5 sm:p-6 lg:mt-5">
           <h2 className="text-base font-bold">What happens next</h2>
           <ol className="mt-4 grid gap-3.5">
-            {bookingJourneyFor(depositUsd).map((step, index) => (
+            {bookingJourneyFor(depositUsd, depositMode).map((step, index) => (
               <li key={step.title} className="flex gap-3">
                 <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-tint text-xs font-semibold text-brand-deep">
                   {index + 1}

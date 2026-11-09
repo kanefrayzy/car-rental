@@ -51,6 +51,7 @@ class BookingController extends Controller
                 'tax_rate' => $quote['taxRate'],
                 'tax_usd' => $quote['taxUsd'],
                 'deposit_usd' => SiteSettings::depositUsd(),
+                'deposit_mode' => config('rental.deposit.mode'),
                 'name' => trim(preg_replace('/\s+/', ' ', $request->validated('name'))),
                 'phone' => $request->normalizedPhone(),
                 'email' => strtolower(trim($request->validated('email'))),
@@ -65,6 +66,7 @@ class BookingController extends Controller
             'bookingId' => $booking->public_id,
             'status' => $booking->status->value,
             'depositUsd' => $booking->deposit_usd,
+            'depositMode' => $booking->deposit_mode,
             // The customer's private booking page; the site opens it right away.
             'link' => $booking->pageLink(),
         ], 201);

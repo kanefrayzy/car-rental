@@ -13,6 +13,8 @@ class SettingsController extends Controller
     {
         return response()->json([
             'depositUsd' => SiteSettings::depositUsd(),
+            // "hold" (a card authorisation, the default) or "charge"; config/rental.php.
+            'depositMode' => config('rental.deposit.mode'),
             'instagramUrl' => SiteSettings::instagramUrl(),
         ]);
     }

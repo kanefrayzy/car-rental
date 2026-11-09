@@ -3,8 +3,11 @@
 namespace App\Providers;
 
 use App\Services\Deposits\DepositGateway;
+use App\Services\Deposits\HoldGateway;
 use App\Services\Deposits\StripeDepositGateway;
+use App\Services\Deposits\StripeHoldGateway;
 use App\Services\Deposits\UnconfiguredDepositGateway;
+use App\Services\Deposits\UnconfiguredHoldGateway;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -22,6 +25,15 @@ class AppServiceProvider extends ServiceProvider
             return $secret
                 ? new StripeDepositGateway(new StripeClient($secret), config('services.stripe.capture_method'))
                 : new UnconfiguredDepositGateway;
+        });
+
+        // Deposit holds on a saved card (rental.deposit.mode "hold"), with the same key.
+        $this->app->bind(HoldGateway::class, function () {
+            $secret = config('services.stripe.secret');
+
+            return $secret
+                ? new StripeHoldGateway(new StripeClient($secret), (bool) config('rental.deposit.extended_authorization'))
+                : new UnconfiguredHoldGateway;
         });
     }
 

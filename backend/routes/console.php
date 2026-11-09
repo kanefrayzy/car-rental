@@ -3,6 +3,7 @@
 use App\Models\Post;
 use App\Models\User;
 use App\Services\BlogRevalidator;
+use App\Services\DepositHolds;
 use App\Services\DocumentRetention;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -68,6 +69,20 @@ Artisan::command('bookings:prune-documents {--dry-run}', function (DocumentReten
 })->purpose('Delete licences and insurance cards past the retention period');
 
 Schedule::command('bookings:prune-documents')->dailyAt('03:30')->timezone(config('rental.timezone'));
+
+/*
+ * Deposit holds (App\Services\DepositHolds): places the holds due before pick-up, renews the
+ * ones about to lapse while still needed, notices expired ones, reminds the owner of open
+ * holds after the return. Every five minutes; safe to run by hand.
+ */
+Artisan::command('bookings:deposit-holds', function (DepositHolds $holds) {
+    $counts = $holds->run();
+    $this->info(collect($counts)->map(fn (int $count, string $what) => "{$what} {$count}")->join(', '));
+
+    return 0;
+})->purpose('Place, renew and check deposit holds; remind the owner of open ones');
+
+Schedule::command('bookings:deposit-holds')->everyFiveMinutes()->withoutOverlapping();
 
 /*
  * Tells the website about scheduled posts whose time has come (saving a post tells it at

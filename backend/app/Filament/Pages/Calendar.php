@@ -116,7 +116,7 @@ class Calendar extends Page
                 'kind' => match (true) {
                     $booking->status === BookingStatus::Confirmed => 'confirmed',
                     $booking->status === BookingStatus::Returned => 'returned',
-                    $booking->status === BookingStatus::DepositPaid => 'paid',
+                    in_array($booking->status, [BookingStatus::DepositPaid, BookingStatus::CardSaved], true) => 'paid',
                     $booking->holdExpired() => 'expired',
                     default => 'request',
                 },

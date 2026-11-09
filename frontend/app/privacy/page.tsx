@@ -47,7 +47,8 @@ export default function PrivacyPage() {
         <li>A photo or scan of your driver’s license and your proof of insurance.</li>
       </ul>
       <p>
-        If you pay a deposit online, your card is handled by our payment processor, Stripe. We
+        If you save a card for the deposit hold or pay online, your card is handled by our payment
+        processor, Stripe, which keeps it for the hold and for charges under the Rental Terms. We
         never see or store your full card number.
       </p>
 
@@ -119,7 +120,7 @@ export default function PrivacyPage() {
         your latest booking, and your answer to our cookie notice. This stays on your device.
       </p>
       <p>
-        When you pay a deposit or the rental, our payment processor, Stripe, sets its own
+        When you save your card or pay the rental, our payment processor, Stripe, sets its own
         cookies on the payment form to keep the payment secure and prevent fraud.
       </p>
 

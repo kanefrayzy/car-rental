@@ -1,5 +1,5 @@
 import { site } from "./site";
-import { rentalTerms, usd } from "./terms";
+import { depositDefaults, rentalTerms, usd, type DepositMode } from "./terms";
 
 const { booking, location } = site;
 
@@ -10,18 +10,27 @@ const { booking, location } = site;
 
 export type StepIcon = "calendar" | "message" | "documents" | "deposit";
 
-/** The deposit comes from the admin panel's Settings page (lib/catalog.ts, getSiteSettings). */
-export const stepsFor = (depositUsd: number): { icon: StepIcon; title: string; text: string }[] => [
+/**
+ * The deposit comes from the admin panel's Settings page (lib/catalog.ts, getSiteSettings); the
+ * mode, a hold on the card (since 2026-11-10) or the old charge, from the API's config.
+ */
+export const stepsFor = (depositUsd: number, mode: DepositMode = depositDefaults.mode): { icon: StepIcon; title: string; text: string }[] => [
   {
     icon: "calendar",
     title: "Pick your dates\nand send a request",
     text: "See the price with tax\nbefore you send it.",
   },
-  {
-    icon: "deposit",
-    title: "Pay the\nrefundable deposit",
-    text: `${usd(depositUsd)} by card locks\nyour dates.`,
-  },
+  mode === "hold"
+    ? {
+        icon: "deposit",
+        title: "Save your card\nfor the deposit",
+        text: `A ${usd(depositUsd)} refundable hold.\nNothing is charged.`,
+      }
+    : {
+        icon: "deposit",
+        title: "Pay the\nrefundable deposit",
+        text: `${usd(depositUsd)} by card locks\nyour dates.`,
+      },
   {
     icon: "documents",
     title: "Upload license\nand insurance",
@@ -114,13 +123,18 @@ export type ContactTopic = (typeof contactTopics)[number]["value"];
  * The customer's path from request to pickup, as the booking form and the booking page
  * explain it. The booking page (BookingTracker) shows the live state of each step.
  */
-export const bookingJourneyFor = (depositUsd: number): { title: string; text: string }[] => [
+export const bookingJourneyFor = (depositUsd: number, mode: DepositMode = depositDefaults.mode): { title: string; text: string }[] => [
   { title: "Send your request", text: "Nothing is charged yet." },
-  {
-    title: `Pay the ${usd(depositUsd)} deposit`,
-    text: `Refundable. It locks your dates; without it they are held for ${booking.holdHours} hours.`,
-  },
-  { title: "Upload license and insurance", text: "Two photos on your private booking page." },
+  mode === "hold"
+    ? {
+        title: `Save your card for the ${usd(depositUsd)} hold`,
+        text: `Nothing is charged. It locks your dates; without it they are reserved for ${booking.holdHours} hours. The hold goes on ${depositDefaults.holdHoursBeforePickup} hours before pickup and is released after the return.`,
+      }
+    : {
+        title: `Pay the ${usd(depositUsd)} deposit`,
+        text: `Refundable. It locks your dates; without it they are held for ${booking.holdHours} hours.`,
+      },
+  { title: "Upload license and insurance", text: "Two photos on your private booking page, now or any time before pickup." },
   { title: "We confirm", text: "By email, usually the same day." },
   { title: "Pay for the rental", text: "Online, any time before pickup." },
 ];
@@ -152,7 +166,9 @@ export const requirements: { icon: RequirementIcon; title: string; text: string 
 
 // Answers read their numbers from config: site.booking (confirmed) and config/terms.ts
 // (templates until the client confirms them). /rental-terms states the same rules.
-export const faqFor = (depositUsd: number): { question: string; answer: string }[] => [
+export const faqFor = (depositUsd: number, mode: DepositMode = depositDefaults.mode): { question: string; answer: string }[] => {
+  const hold = mode === "hold";
+  const all = [
   {
     question: "What are the rental requirements?",
     answer: `You need to be at least ${booking.minDriverAge} years old, hold a valid driver’s license, carry your own ${rentalTerms.driver.insurance} insurance that extends to a rental car, and have a credit card in the driver’s name.`,
@@ -163,8 +179,18 @@ export const faqFor = (depositUsd: number): { question: string; answer: string }
   },
   {
     question: "What does it cost in total?",
-    answer: `The daily rate for every 24 hours from your pick-up time (a part of a day counts as a day), plus ${rentalTerms.taxRatePercent}% tax, plus delivery if you are beyond our free delivery area. The ${usd(depositUsd)} security deposit is separate: it is charged when you request the booking and refunded after the car is returned, minus any extra charges.`,
+    answer: hold
+      ? `The daily rate for every 24 hours from your pick-up time (a part of a day counts as a day), plus ${rentalTerms.taxRatePercent}% tax, plus delivery if you are beyond our free delivery area. The security deposit is separate: a ${usd(depositUsd)} refundable hold on your card, not a charge.`
+      : `The daily rate for every 24 hours from your pick-up time (a part of a day counts as a day), plus ${rentalTerms.taxRatePercent}% tax, plus delivery if you are beyond our free delivery area. The ${usd(depositUsd)} security deposit is separate: it is charged when you request the booking and refunded after the car is returned, minus any extra charges.`,
   },
+  ...(hold
+    ? [
+        {
+          question: "How does the security deposit work?",
+          answer: `It is a ${usd(depositUsd)} hold on your card, not a charge. You save your card when you request the booking, and we place the hold ${depositDefaults.holdHoursBeforePickup} hours before pickup. After the car is returned we release it. If something is owed under the Rental Terms, such as tolls, tickets, extra miles, late return, fuel or cleaning, we may use part of the hold and release the rest. Your bank decides how fast a released hold shows as available again.`,
+        },
+      ]
+    : []),
   {
     question: "Can I pick up or get delivery?",
     answer: `Both. Pick the car up in ${location.city}, or have it delivered to your home, hotel or event. Delivery is free within ${booking.delivery.freeRadiusMiles} miles of ${location.city}. Farther drop-offs cost ${usd(booking.delivery.feeMinUsd)} to ${usd(booking.delivery.feeMaxUsd)} depending on distance, and we confirm the fee when we reply to your request. We can deliver to JFK, priced after you book.`,
@@ -180,11 +206,13 @@ export const faqFor = (depositUsd: number): { question: string; answer: string }
   },
   {
     question: "Is there a mileage limit?",
-    answer: `Each rental day includes ${booking.includedMilesPerDay} miles, so a three-day rental comes with ${3 * booking.includedMilesPerDay}. Extra miles are ${usd(booking.extraMileUsd)} each, taken from your deposit after you return the car.`,
+    answer: `Each rental day includes ${booking.includedMilesPerDay} miles, so a three-day rental comes with ${3 * booking.includedMilesPerDay}. Extra miles are ${usd(booking.extraMileUsd)} each, ${hold ? "charged to your card after you return the car" : "taken from your deposit after you return the car"}.`,
   },
   {
     question: "What is the cancellation policy?",
-    answer: `Cancel up to ${rentalTerms.cancellation.freeHoursBefore} hours before pickup at no charge. After that the price of ${rentalTerms.cancellation.lateCancellationFeeDays === 1 ? "one rental day" : `${rentalTerms.cancellation.lateCancellationFeeDays} rental days`} is kept from your deposit, and we refund the rest.`,
+    answer: hold
+      ? `Cancel up to ${rentalTerms.cancellation.freeHoursBefore} hours before pickup at no charge. After that the price of ${rentalTerms.cancellation.lateCancellationFeeDays === 1 ? "one rental day" : `${rentalTerms.cancellation.lateCancellationFeeDays} rental days`} is charged to the card you saved, and any hold on it is released.`
+      : `Cancel up to ${rentalTerms.cancellation.freeHoursBefore} hours before pickup at no charge. After that the price of ${rentalTerms.cancellation.lateCancellationFeeDays === 1 ? "one rental day" : `${rentalTerms.cancellation.lateCancellationFeeDays} rental days`} is kept from your deposit, and we refund the rest.`,
   },
   {
     question: "What if I return the car late or with less fuel?",
@@ -194,4 +222,6 @@ export const faqFor = (depositUsd: number): { question: string; answer: string }
     question: "Who pays for tolls and tickets?",
     answer: `You do. Tolls and tickets from your rental are passed on to you with a ${usd(rentalTerms.tollAndTicketAdminFeeUsd)} processing fee each. Racing, track days, off-road driving and drivers not named on the agreement are not allowed.`,
   },
-];
+  ];
+  return all;
+};

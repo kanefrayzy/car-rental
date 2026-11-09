@@ -69,7 +69,12 @@ services:
       MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-bookings@example.com}
       FRONTEND_URL: http://localhost:${WEB_PORT:-3000}
       RENTAL_OWNER_EMAIL: ${RENTAL_OWNER_EMAIL:-owner@example.com}
-      RENTAL_DEPOSIT_USD: ${RENTAL_DEPOSIT_USD:-1000}
+      # The deposit (config/rental.php): the default amount for the admin Settings page, and
+      # "hold" (a card authorisation) or "charge". STRIPE_EXTENDED_AUTHORIZATION only once
+      # Stripe has enabled extended authorization on the account.
+      DEPOSIT_AMOUNT: ${DEPOSIT_AMOUNT:-500}
+      DEPOSIT_MODE: ${DEPOSIT_MODE:-hold}
+      STRIPE_EXTENDED_AUTHORIZATION: ${STRIPE_EXTENDED_AUTHORIZATION:-false}
       # Admin panel account at /admin, created on first start when both are set.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-owner@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

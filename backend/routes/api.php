@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\BookingDocumentController;
 use App\Http\Controllers\Api\BookingUploadController;
 use App\Http\Controllers\Api\CarController;
+use App\Http\Controllers\Api\CardController;
 use App\Http\Controllers\Api\ContactController;
 use App\Http\Controllers\Api\DepositController;
 use App\Http\Controllers\Api\RentalPaymentController;
@@ -29,6 +30,9 @@ Route::middleware('throttle:api')->group(function () {
     Route::post('bookings', [BookingController::class, 'store'])->middleware('throttle:bookings');
     Route::post('bookings/{booking}/deposit', [DepositController::class, 'store']);
     Route::post('bookings/{booking}/rental-payment', [RentalPaymentController::class, 'store']);
+    // The deposit hold: save the card (with the agreement), or finish a hold the bank refused.
+    Route::post('bookings/{booking}/card', [CardController::class, 'store']);
+    Route::post('bookings/{booking}/hold', [CardController::class, 'resume']);
 
     // The customer's document upload, through the signed link in their email. GET and POST
     // share one path, so one signature covers both.

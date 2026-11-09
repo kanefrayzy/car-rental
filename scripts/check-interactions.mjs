@@ -194,7 +194,7 @@ for (const viewport of [
   const underDates = page.locator("[data-price-under-dates]");
   if (name === "mobile") {
     const text = (await underDates.textContent()) ?? "";
-    check("phones see the total, tax and deposit right under the dates", /× 3 days/.test(text) && text.includes(usd(3 * price)) && /Tax \(/.test(text) && text.includes("Refundable deposit") && text.includes("Nothing is charged now"), text.slice(0, 80));
+    check("phones see the total, tax and deposit right under the dates", /× 3 days/.test(text) && text.includes(usd(3 * price)) && /Tax \(/.test(text) && text.includes("Security deposit:") && text.includes("refundable hold") && text.includes("Nothing is charged now"), text.slice(0, 80));
   } else {
     check("desktop keeps the total in the side panel only", !(await underDates.isVisible()));
   }
@@ -282,16 +282,20 @@ for (const viewport of [
   check("a sent request opens the booking page", true);
   // Counted once, and only now that the API accepted the request (no GA4 ID: nothing to count).
   const submits = await bookingSubmits();
-  if (submits !== null) check("booking_submit is sent once, after the API accepted the request", submits === 1, `${submits} sent`);
+  if (submits !== null) {
+    check("booking_submit is sent once, after the API accepted the request", submits === 1, `${submits} sent`);
+    const depositType = await page.evaluate(() => window.dataLayer.find((entry) => entry[0] === "event" && entry[1] === "booking_submit")?.[2]?.deposit_type);
+    check("booking_submit says the deposit is a hold", depositType === "hold", String(depositType));
+  }
   const paymentViews = await gaEvents("booking_payment_view");
   if (paymentViews !== null)
     check(
-      "booking_payment_view is sent once, for the deposit step",
-      paymentViews.length === 1 && paymentViews[0].payment === "deposit",
+      "booking_payment_view is sent once, for the deposit step, as a hold",
+      paymentViews.length === 1 && paymentViews[0].payment === "deposit" && paymentViews[0].deposit_type === "hold",
       JSON.stringify(paymentViews.map(({ page_location, ...rest }) => rest)),
     );
-  check("which says what to do next", await page.getByText("Next: pay the").isVisible());
-  check("and shows the status", await page.getByText("Waiting for your deposit").isVisible());
+  check("which says what to do next", await page.getByText("Next: save your card for the").isVisible());
+  check("and shows the status", await page.getByText("Waiting for your card").isVisible());
   check("the address drops the one-time new=1", !page.url().includes("new=1"));
   await page.screenshot({ path: join(shots, `booking-page-${name}.png`), fullPage: true });
 

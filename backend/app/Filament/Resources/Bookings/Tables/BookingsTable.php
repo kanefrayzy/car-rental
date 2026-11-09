@@ -51,6 +51,10 @@ class BookingsTable
                     ViewAction::make()->label('Open'),
                     BookingActions::markDepositPaid(),
                     BookingActions::refundDeposit(),
+                    BookingActions::placeHoldNow(),
+                    BookingActions::releaseHold(),
+                    BookingActions::captureHold(),
+                    BookingActions::extraCharge(),
                     BookingActions::markRentalPaid(),
                     BookingActions::markReturned(),
                     BookingActions::sendReviewRequest(),
@@ -133,11 +137,17 @@ class BookingsTable
                 ->state(fn (Booking $record): string => match (true) {
                     $record->deposit_refunded_at !== null => 'Refunded',
                     $record->deposit_paid_at !== null => 'Paid',
+                    // Hold mode: Scheduled, On hold, Hold failed, Released, Captured $X (reason).
+                    $record->usesHold() => $record->holdSummary(),
                     default => 'Not paid',
                 })
-                ->color(fn (string $state): string => match ($state) {
-                    'Paid' => 'success',
-                    'Refunded' => 'info',
+                ->tooltip(fn (Booking $record): ?string => $record->usesHold() && $record->hold_expires_at && $record->hold_status?->isOpen()
+                    ? 'Hold ends '.$record->hold_expires_at->setTimezone(config('rental.timezone'))->format('M j, g:i A')
+                    : null)
+                ->color(fn (Booking $record, string $state): string => match (true) {
+                    $record->usesHold() && $record->hold_status !== null && $record->deposit_paid_at === null => $record->hold_status->getColor(),
+                    $state === 'Paid' => 'success',
+                    $state === 'Refunded' => 'info',
                     default => 'gray',
                 }),
             TextColumn::make('created_at')

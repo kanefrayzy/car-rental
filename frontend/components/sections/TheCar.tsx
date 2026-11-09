@@ -1,12 +1,13 @@
 import { BookButton } from "@/components/booking/BookButton";
+import { DepositBadge } from "@/components/ui/DepositBadge";
 import { ArrowRightIcon } from "@/components/ui/icons";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SpecGlyph } from "@/components/ui/spec-icons";
 import type { Car } from "@/config/cars";
-import { getCars } from "@/lib/catalog";
+import { getCars, getSiteSettings, type SiteSettings } from "@/lib/catalog";
 import { CarGallery } from "./CarGallery";
 
-function CarCard({ car }: { car: Car }) {
+function CarCard({ car, settings }: { car: Car; settings: SiteSettings }) {
   return (
     <article
       aria-label={car.fullName}
@@ -33,9 +34,10 @@ function CarCard({ car }: { car: Car }) {
             <span className="text-[0.8125rem] text-brand-deep xl:text-[1.0625rem]">/day</span>
           </p>
         </div>
-        <p className="mt-1 border-b border-line pb-4 text-xs text-muted xl:mt-1.5 xl:pb-6 xl:text-sm">
-          {car.fullName}
-        </p>
+        <p className="mt-1 text-xs text-muted xl:mt-1.5 xl:text-sm">{car.fullName}</p>
+        <div className="border-b border-line pt-2.5 pb-4 xl:pt-3 xl:pb-6">
+          {settings.depositMode === "hold" && <DepositBadge amountUsd={settings.depositUsd} />}
+        </div>
 
         <dl className="grid grid-cols-4 py-5 xl:py-7">
           {car.specs.map((spec) => (
@@ -67,7 +69,7 @@ function CarCard({ car }: { car: Car }) {
 }
 
 export async function TheCar({ title = "The Car" }: { title?: string }) {
-  const cars = await getCars();
+  const [cars, settings] = await Promise.all([getCars(), getSiteSettings()]);
 
   return (
     <section id="the-car" aria-labelledby="the-car-title" className="container-site pt-9 xl:pt-[1.875rem]">
@@ -76,7 +78,7 @@ export async function TheCar({ title = "The Car" }: { title?: string }) {
       {/* One card per car in config/cars.ts, priced by lib/catalog.ts. */}
       <div className="mt-4 grid gap-6 xl:mt-3 xl:gap-5">
         {cars.map((car) => (
-          <CarCard key={car.slug} car={car} />
+          <CarCard key={car.slug} car={car} settings={settings} />
         ))}
       </div>
     </section>

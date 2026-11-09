@@ -1,3 +1,4 @@
+import { DepositBadge } from "@/components/ui/DepositBadge";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
@@ -55,7 +56,8 @@ async function BookContent({
   params,
 }: Pick<PageProps<"/book/[slug]">, "params">) {
   const { slug } = await params;
-  const car = (await getCars()).find((item) => item.slug === slug);
+  const [cars, settings] = await Promise.all([getCars(), getSiteSettings()]);
+  const car = cars.find((item) => item.slug === slug);
   if (!car) notFound();
 
   return (
@@ -74,10 +76,11 @@ async function BookContent({
           {site.location.city} or have it delivered on Long Island. Send a
           request and we confirm by email, usually the same day.
         </p>
+        {settings.depositMode === "hold" && <DepositBadge amountUsd={settings.depositUsd} className="mt-3" />}
       </div>
 
       <div className="mt-6 xl:mt-8">
-        <BookingForm car={car} depositUsd={(await getSiteSettings()).depositUsd} />
+        <BookingForm car={car} depositUsd={settings.depositUsd} depositMode={settings.depositMode} />
       </div>
     </div>
   );

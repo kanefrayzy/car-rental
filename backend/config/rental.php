@@ -67,7 +67,56 @@ return [
     // How far ahead a pick-up date may be.
     'max_advance_days' => (int) env('RENTAL_MAX_ADVANCE_DAYS', 365),
 
-    'deposit_usd' => (int) env('RENTAL_DEPOSIT_USD', 1000),
+    /*
+     * The security deposit (owner, 2026-11-10: a $500 hold instead of a $1,000 charge). The
+     * amount is the default for the admin panel's Settings page, where the owner changes it;
+     * a request keeps the amount and mode it was made with. The site has the same defaults:
+     * depositDefaults in frontend/config/terms.ts. Change both together.
+     *
+     * "hold": the request saves the card (Stripe SetupIntent, no charge); a card authorisation
+     * for the amount is placed `hold_hours_before_pickup` before pick-up (at once when pick-up
+     * is sooner), renewed before Stripe's capture deadline while the rental needs it, and
+     * released, or partly captured, by the owner after the return (App\Services\DepositHolds).
+     * "charge": the old way, the deposit charged with the request and refunded after the return.
+     */
+    'deposit' => [
+        'amount_usd' => (int) env('DEPOSIT_AMOUNT', 500),
+        'mode' => env('DEPOSIT_MODE', 'hold') === 'charge' ? 'charge' : 'hold',
+        'hold_hours_before_pickup' => (int) env('DEPOSIT_HOLD_HOURS_BEFORE_PICKUP', 24),
+        // A hold is renewed this long before Stripe's capture deadline (capture_before).
+        'renew_hours_before_expiry' => (int) env('DEPOSIT_RENEW_HOURS_BEFORE_EXPIRY', 12),
+        // The owner's time after the return to release or use the hold; it is kept (renewed)
+        // until then, and the owner is reminded then, or earlier if the hold ends first.
+        'inspection_hours_after_return' => (int) env('DEPOSIT_INSPECTION_HOURS', 24),
+        // Stripe's extended authorization (up to 30 days for car rentals). Needs IC+ pricing or
+        // Stripe's approval: without it Stripe refuses the hold ("not eligible", checked
+        // 2026-11-10), so it stays off until Stripe turns it on for the account.
+        'extended_authorization' => (bool) env('STRIPE_EXTENDED_AUTHORIZATION', false),
+        // The largest single extra charge the panel takes, against typing slips.
+        'max_extra_charge_usd' => (int) env('DEPOSIT_MAX_EXTRA_CHARGE', 10000),
+    ],
+
+    // Cancelling is free up to this long before pick-up; later the price of one day is kept
+    // (Rental Terms, confirmed 2026-10-20). The site: rentalTerms.cancellation in terms.ts.
+    'free_cancellation_hours' => 48,
+
+    /*
+     * Why the owner may take money after a rental. `capture`: may be taken from the hold (the
+     * customer's checkbox names these); `extra`: may be charged to the saved card, the
+     * charges listed in the Rental Terms (frontend/app/rental-terms/page.tsx).
+     */
+    'charge_reasons' => [
+        'tolls' => ['label' => 'Tolls', 'capture' => true],
+        'tickets' => ['label' => 'Tickets', 'capture' => true],
+        'extra_miles' => ['label' => 'Extra miles', 'capture' => true],
+        'late_return' => ['label' => 'Late return', 'capture' => true],
+        'fuel' => ['label' => 'Fuel', 'capture' => true],
+        'cleaning' => ['label' => 'Cleaning', 'capture' => true],
+        'smoking' => ['label' => 'Smoking or vaping', 'capture' => false],
+        'lost_key' => ['label' => 'Lost key', 'capture' => false],
+        'damage' => ['label' => 'Damage not covered by insurance', 'capture' => false],
+        'late_cancellation' => ['label' => 'Late cancellation', 'capture' => false],
+    ],
 
     // Percent charged on the rental. TODO: confirm with the client's accountant (NY adds a
     // special passenger car rental tax on top of sales tax). The site shows the same rate:

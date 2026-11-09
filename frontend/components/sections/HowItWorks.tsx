@@ -7,7 +7,8 @@ import { getSiteSettings } from "@/lib/catalog";
 // Below xl each step is one compact row: number, icon, then title and text side by side.
 // From xl up it is the desktop mockup's column: icon above the title, steps side by side.
 export async function HowItWorks() {
-  const steps = stepsFor((await getSiteSettings()).depositUsd);
+  const { depositUsd, depositMode } = await getSiteSettings();
+  const steps = stepsFor(depositUsd, depositMode);
 
   return (
     <section id="how-it-works" aria-labelledby="how-it-works-title" className="container-site">
