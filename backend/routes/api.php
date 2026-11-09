@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AvailabilityController;
 use App\Http\Controllers\Api\BlogPostController;
+use App\Http\Controllers\Api\BlogPublishController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\BookingDocumentController;
 use App\Http\Controllers\Api\BookingUploadController;
@@ -52,6 +53,8 @@ Route::middleware('throttle:blog')->prefix('blog')->group(function () {
     Route::get('preview/{post}', [BlogPostController::class, 'preview'])
         ->middleware('signed:relative')
         ->name('blog.preview');
+    // The scheduled blog agent publishes here (bearer token; 404 when none is configured).
+    Route::post('publish', BlogPublishController::class)->middleware('throttle:blog-publish');
 });
 
 // Called by Stripe's servers, authenticated by its signature, so not rate limited.

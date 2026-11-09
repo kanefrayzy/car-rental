@@ -102,6 +102,8 @@ services:
       # straight over the internal network (Caddy does not let this path in from outside).
       BLOG_REVALIDATE_URL: http://frontend:3000/internal/revalidate
       BLOG_REVALIDATE_SECRET: ${BLOG_REVALIDATE_SECRET:-}
+      # POST /api/blog/publish for the scheduled blog agent (scripts/blog-agent). Empty: off.
+      BLOG_PUBLISH_TOKEN: ${BLOG_PUBLISH_TOKEN:-}
     volumes:
       # Customer documents, the blog's pictures and the generated app key: back this up.
       - backend-storage:/var/www/html/storage

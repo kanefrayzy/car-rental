@@ -59,4 +59,45 @@ return [
     'revalidate_url' => env('BLOG_REVALIDATE_URL'),
     'revalidate_secret' => env('BLOG_REVALIDATE_SECRET'),
 
+    /*
+     * POST /api/blog/publish (2026-11-09): the scheduled blog agent publishes through it,
+     * three times a week. It can only create a live post: no edits, no deletes, nothing else.
+     * Empty token: the address answers 404.
+     */
+    'publish' => [
+        'token' => env('BLOG_PUBLISH_TOKEN'),
+        // A second post within this many hours of the last one is refused (a run fired twice).
+        'min_hours_between' => 12,
+        // A post shorter than this is not a post worth publishing.
+        'min_content_chars' => 2500,
+        // Words no published field may contain (user, 2026-10-21: posts without "Hellcat";
+        // the engine is not final either, see CLAUDE.md).
+        'banned_words' => ['hellcat'],
+    ],
+
+    /*
+     * Covers for posts published through the API: real photos of the car, 16:9, in
+     * resources/blog-covers/<key>.webp (built by scripts/images.mjs, which lists the same keys).
+     * A new post gets the picture unused longest whose view differs from the newest post's,
+     * so the blog and the home page never show the same angle twice in a row.
+     */
+    'cover_pool' => [
+        'front-three-quarter-day' => ['view' => 'front', 'alt' => 'The silver Charger Widebody from the front right in daylight, black hood and red calipers'],
+        'front-dusk-blue' => ['view' => 'front', 'alt' => 'The silver Charger Widebody head-on at dusk, headlights on'],
+        'rear-seats' => ['view' => 'interior', 'alt' => 'The red leather rear seats of the Charger through the open rear door'],
+        'rear-sunset' => ['view' => 'rear', 'alt' => 'The Charger Widebody from the rear at sunset, tail lights on'],
+        'side-driveway' => ['view' => 'side', 'alt' => 'The silver Charger Widebody from the front left in a driveway'],
+        'interior-seats' => ['view' => 'interior', 'alt' => "Red leather front seats and the steering wheel through the open driver's door"],
+        'rear-tail-sunset' => ['view' => 'rear', 'alt' => 'The lit full-width tail light of the silver Charger Widebody at sunset'],
+        'front-three-quarter-dusk' => ['view' => 'front', 'alt' => 'The silver Charger Widebody at dusk with its headlights on, lamps lit behind it'],
+        'front-dusk-lamps' => ['view' => 'front', 'alt' => 'The Charger Widebody head-on on a rooftop at dusk, headlights on, lamps behind it'],
+        'front-dusk-low' => ['view' => 'front', 'alt' => 'A low front view of the silver Charger Widebody at dusk, headlights on'],
+        'front-headlight-flare' => ['view' => 'front', 'alt' => 'The Charger Widebody at dusk, its headlights flaring toward the camera'],
+        'front-dusk-wide' => ['view' => 'front', 'alt' => 'The silver Charger Widebody on an empty rooftop car park at dusk'],
+        'hood-headlight' => ['view' => 'detail', 'alt' => 'Close-up of the satin black hood, smoked headlight and grille of the Charger Widebody'],
+        'wheel-caliper' => ['view' => 'detail', 'alt' => 'Close-up of a satin black wheel and red brake caliper under the widebody flare'],
+        'rear-sunset-wide' => ['view' => 'rear', 'alt' => 'The silver Charger Widebody from the rear at sunset, the sky orange behind it'],
+        'side-wheels' => ['view' => 'side', 'alt' => 'The silver Charger Widebody from the front left, black wheels and red calipers'],
+    ],
+
 ];

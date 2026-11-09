@@ -40,5 +40,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('blog', fn (Request $request) => Limit::perMinute(
             config('rental.rate_limits.blog_per_minute'),
         )->by($request->ip()));
+
+        // POST /api/blog/publish: a few tries an hour is plenty, and it slows token guessing.
+        RateLimiter::for('blog-publish', fn (Request $request) => Limit::perHour(10)->by($request->ip()));
     }
 }

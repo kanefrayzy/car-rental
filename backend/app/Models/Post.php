@@ -37,9 +37,11 @@ class Post extends Model
         'content',
         'cover_image',
         'cover_alt',
+        'cover_source',
         'meta_title',
         'meta_description',
         'status',
+        'origin',
         'published_at',
     ];
 
@@ -67,6 +69,10 @@ class Post extends Model
             $post->changesOnSave = ! $post->exists || $post->isDirty();
             $post->slug = filled($post->slug) ? Str::slug($post->slug) : static::uniqueSlug($post->title, $post->id);
             $post->reading_time = BlogMarkdown::readingTime((string) $post->content);
+            // A cover changed in the admin panel is no longer the pool picture (BlogCoverPool).
+            if ($post->isDirty('cover_image') && ! $post->isDirty('cover_source')) {
+                $post->cover_source = null;
+            }
             if (blank($post->excerpt)) {
                 $post->excerpt = BlogMarkdown::excerpt((string) $post->content) ?: null;
             }

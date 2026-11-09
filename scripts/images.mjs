@@ -93,6 +93,13 @@ const shots = {
   rearSeats: { file: "instagram/post-4.jpg", brightness: 1.02 },
   // The whole car from the front left, in a driveway. No plate in frame.
   side: { file: "client-2/photo-5.jpg" },
+  // For the blog's cover pool only (2026-11-09): straight fronts at dusk, headlights on. These
+  // were left out of the gallery for the photographer's shadow on the ground; the 16:9 crops
+  // below stop above it.
+  frontDuskLamps: { file: "client-3/5116558093092326903.jpg" },
+  frontDuskLow: { file: "client-3/5116558093092326904.jpg" },
+  frontFlare: { file: "client-3/5116558093092326906.jpg" },
+  frontDuskWide: { file: "client-3/5116558093092326907.jpg" },
 };
 const source = (name) => join(srcDir, shots[name].file);
 
@@ -294,6 +301,7 @@ const crops = [
     "scenic-drives-on-long-island": ["side", { left: 0, top: 360, width: 960, height: 540 }],
     "how-to-rent-an-exotic-car-on-long-island": ["interior", { left: 0, top: 500, width: 1170, height: 658 }],
     "does-car-insurance-cover-exotic-car-rental": ["rear", { left: 0, top: 345, width: 960, height: 540 }],
+    "holiday-light-shows-long-island-2026": ["frontThreeQuarterDusk", { left: 0, top: 465, width: 960, height: 540 }],
   }).map(([slug, [name, region]]) => ({
     out: join(srcDir, "blog-covers", `${slug}.webp`),
     needs: [source(name)],
@@ -303,6 +311,40 @@ const crops = [
         .extract(region)
         .resize({ width: 1600, withoutEnlargement: true })
         .webp({ quality: 90 })
+        .toFile(out);
+    },
+  })),
+  // The blog's cover pool (2026-11-09): posts published through the API (POST
+  // /api/blog/publish, the scheduled blog agent) get their cover from here. The server picks the
+  // one unused longest, never the same view as the newest post; views and alt texts are in
+  // backend/config/blog.php (cover_pool), which must list the same keys. The first eight are
+  // the covers of the posts written by hand, so the rotation knows them.
+  ...Object.entries({
+    "front-three-quarter-day": ["frontThreeQuarter", { left: 0, top: 1690, width: 3072, height: 1728 }],
+    "front-dusk-blue": ["front", { left: 0, top: 500, width: 960, height: 540 }],
+    "rear-seats": ["rearSeats", { left: 0, top: 470, width: 1170, height: 658 }],
+    "rear-sunset": ["rearSunset", { left: 0, top: 465, width: 960, height: 540 }],
+    "side-driveway": ["side", { left: 0, top: 360, width: 960, height: 540 }],
+    "interior-seats": ["interior", { left: 0, top: 500, width: 1170, height: 658 }],
+    "rear-tail-sunset": ["rear", { left: 0, top: 345, width: 960, height: 540 }],
+    "front-three-quarter-dusk": ["frontThreeQuarterDusk", { left: 0, top: 465, width: 960, height: 540 }],
+    "front-dusk-lamps": ["frontDuskLamps", { left: 0, top: 440, width: 960, height: 540 }],
+    "front-dusk-low": ["frontDuskLow", { left: 0, top: 420, width: 960, height: 540 }],
+    "front-headlight-flare": ["frontFlare", { left: 0, top: 360, width: 960, height: 540 }],
+    "front-dusk-wide": ["frontDuskWide", { left: 0, top: 340, width: 960, height: 540 }],
+    "hood-headlight": ["frontThreeQuarter", { left: 1100, top: 2300, width: 1972, height: 1109 }],
+    "wheel-caliper": ["frontThreeQuarter", { left: 0, top: 2500, width: 1600, height: 900 }],
+    "rear-sunset-wide": ["rearSunset", { left: 0, top: 300, width: 960, height: 540 }],
+    "side-wheels": ["side", { left: 0, top: 470, width: 960, height: 540 }],
+  }).map(([key, [name, region]]) => ({
+    out: join(root, "backend", "resources", "blog-covers", `${key}.webp`),
+    needs: [source(name)],
+    build: async (out) => {
+      await mkdir(dirname(out), { recursive: true });
+      return sharp(await prepared(name))
+        .extract(region)
+        .resize({ width: 1600, withoutEnlargement: true })
+        .webp({ quality: 88 })
         .toFile(out);
     },
   })),
