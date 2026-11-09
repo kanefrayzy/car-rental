@@ -24,7 +24,9 @@ A topic is taken if a live post has its slug or covers the same question. Never 
 
 ## 3. Research
 
-Anything you state that is not in the config files above (event dates, places, laws, distances, opening hours, prices of other businesses) must come from a source you read in this run: official sites first (the venue, the organizer, ny.gov, nps.gov, parks.ny.gov, the county), then established local news. Use WebSearch and WebFetch. If a fact cannot be confirmed, leave it out or say "check before you go" and link the official page. Round distances and say "about". Never invent a quote, a statistic, a review or a customer story.
+Anything you state that is not in the config files above (event dates, places, laws, distances, opening hours, fees, prices of other businesses) must come from a page you opened with WebFetch in this run and read yourself: official sites first (the venue, the organizer, ny.gov, nps.gov, parks.ny.gov, the county), then established local news. WebSearch only finds pages: the snippets in its results are not sources, and they often come from an earlier year. Check that a report, an event or a schedule is for this year. If a page cannot be opened, leave its facts out; do not fall back to the search snippet. Round distances and say "about". Never invent a quote, a statistic, a review or a customer story.
+
+If the post sends readers to a park, a beach or a venue, read that place's rules page and mention the ones that matter for a visit with the car: hours and closed days, vehicle fees, and photography permits (New York State parks charge for posed photography). Say where photos with the car are fine: a public road or a lot you have permission to use.
 
 ## 4. Facts you may state, and the ones you may not
 
@@ -43,6 +45,7 @@ May not:
 - The word "Hellcat" anywhere (the API refuses it), the engine, horsepower, torque, 0-60 or top speed figures, "SRT" as a model name.
 - The tax rate (not confirmed), insurance the company sells, gift cards, discounts, packages, chauffeurs, a second car, opening days or holiday closures, anything about availability on a given date.
 - Claims about named competitors.
+- Rules of your own. Quote the rental rules as they are worded above; do not stretch them (for example, "off-road" does not mean a gravel parking lot).
 
 ## 5. Write
 
@@ -61,7 +64,8 @@ Write the post to a scratch file and check it with a short script:
 - lengths of all fields as above, content at least 2,500 characters;
 - every table row has at most two cells (`| a | b |`);
 - every internal link answers 200: `curl -s -o /dev/null -w "%{http_code}" https://buenoexoticsny.com<path>`;
-- every number in the text is either from section 4 or from a source you read (re-read the draft once for this alone).
+- every number in the text is either from section 4 or from a page you opened (re-read the draft once for this alone);
+- read the draft once more as an editor: cut sentences that repeat themselves or say nothing, fix clumsy wording, and make sure every section gives the reader something to do or decide.
 
 ## 7. Publish
 
